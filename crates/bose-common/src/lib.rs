@@ -4,8 +4,10 @@
 
 pub mod config;
 pub mod error;
+pub mod fusion;
 pub mod types;
 
 pub use config::*;
 pub use error::*;
+pub use fusion::*;
 pub use types::*;
