@@ -1,5 +1,5 @@
-use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
 use crate::response::SearxngResponse;
+use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
 use std::time::Instant;
 
 /// SearXNG HTTP 客戶端
@@ -57,9 +57,7 @@ impl SearxngClient {
         let resp = self.http.get(&url).send().await?;
 
         if !resp.status().is_success() {
-            return Err(BoseError::SearxngError(
-                format!("HTTP {}", resp.status())
-            ));
+            return Err(BoseError::SearxngError(format!("HTTP {}", resp.status())));
         }
 
         let searxng_resp: SearxngResponse = resp.json().await?;
@@ -86,7 +84,10 @@ impl SearxngClient {
     }
 
     pub async fn health_check(&self) -> BoseResult<bool> {
-        let url = format!("{}/search?q=test&format=json&number_of_results=1", self.base_url);
+        let url = format!(
+            "{}/search?q=test&format=json&number_of_results=1",
+            self.base_url
+        );
         match self.http.get(&url).send().await {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
@@ -97,8 +98,8 @@ impl SearxngClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_search_success() {

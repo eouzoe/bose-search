@@ -1,11 +1,8 @@
 use bose_common::*;
 use bose_searxng::SearxngClient;
 use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt,
-    handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters,
-    model::*,
-    schemars, tool, tool_handler, tool_router,
+    ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
+    handler::server::wrapper::Parameters, model::*, schemars, tool, tool_handler, tool_router,
     transport::stdio,
 };
 use std::fmt::Write;
@@ -43,13 +40,15 @@ impl BoseSearchServer {
         }
     }
 
-    #[tool(description = "Search the web via SearXNG meta-search engine (247 engines). Returns title, URL, snippet, source engine, and category for each result.")]
+    #[tool(
+        description = "Search the web via SearXNG meta-search engine (247 engines). Returns title, URL, snippet, source engine, and category for each result."
+    )]
     async fn web_search(
         &self,
         Parameters(params): Parameters<WebSearchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let mut query = SearchQuery::new(&params.query)
-            .with_num_results(params.num_results.unwrap_or(10));
+        let mut query =
+            SearchQuery::new(&params.query).with_num_results(params.num_results.unwrap_or(10));
 
         if let Some(cat) = params.category {
             query = query.with_category(&cat);

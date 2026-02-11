@@ -1,5 +1,5 @@
+use bose_common::{SearchResponse, SearchResult};
 use serde::Deserialize;
-use bose_common::{SearchResult, SearchResponse};
 
 /// SearXNG JSON 回應的頂層結構
 #[derive(Debug, Deserialize)]
@@ -40,7 +40,9 @@ impl From<SearxngResult> for SearchResult {
 
 impl SearxngResponse {
     pub fn into_search_response(self, elapsed: f64) -> SearchResponse {
-        let engines_used: Vec<String> = self.results.iter()
+        let engines_used: Vec<String> = self
+            .results
+            .iter()
             .filter_map(|r| r.engine.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
