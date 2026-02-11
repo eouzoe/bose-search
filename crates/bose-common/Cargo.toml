@@ -10,6 +10,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 url = { workspace = true }
 reqwest = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 insta = { workspace = true }

@@ -4,12 +4,14 @@
 
 pub mod blending;
 pub mod config;
+pub mod dedup;
 pub mod error;
 pub mod fusion;
 pub mod types;
 
 pub use blending::*;
 pub use config::*;
+pub use dedup::*;
 pub use error::*;
 pub use fusion::*;
 pub use types::*;
