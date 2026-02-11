@@ -137,6 +137,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bose-crawler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bose-common",
+ "reqwest",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "bose-index"
 version = "0.1.0"
 dependencies = [
