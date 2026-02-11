@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/bose-common",
     "crates/bose-searxng",
-    "crates/bose-mcp",
+    "crates/bose-mcp", "crates/bose-index",
 ]
 
 [workspace.package]
@@ -27,3 +27,4 @@ insta = { version = "1.46", features = ["json", "yaml"] }
 tokio-test = "0.4"
 wiremock = "0.6"
 schemars = "1"
+tantivy = "0.22"

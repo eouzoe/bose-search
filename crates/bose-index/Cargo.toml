@@ -1,0 +1,21 @@
+[package]
+name = "bose-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tantivy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+bose-common = { path = "../bose-common" }
+
+[dev-dependencies]
+insta = { workspace = true }
+tokio-test = { workspace = true }
+tempfile = "3"
