@@ -1,13 +1,13 @@
-# 環境變數和 API 金鑰
+# Build
+/target/
+**/*.rs.bk
+*.pdb
+
+# Secrets
 .env
 .env.local
 *.key
 *.pem
-
-# Rust 編譯產物
-/target/
-**/*.rs.bk
-*.pdb
 
 # IDE
 .vscode/
@@ -19,3 +19,15 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal development files
+.beads/
+.claude/
+CLAUDE.md
+AGENTS.md
+TESTING.md
+INTEGRATION_TEST.md
+SESSION_LOG.md
+openspec/
+.mcp.json
+/src/
