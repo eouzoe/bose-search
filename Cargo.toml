@@ -3,7 +3,9 @@ resolver = "2"
 members = [
     "crates/bose-common",
     "crates/bose-searxng",
-    "crates/bose-mcp", "crates/bose-index", "crates/bose-crawler",
+    "crates/bose-mcp",
+    "crates/bose-index",
+    "crates/bose-crawler",
 ]
 
 [workspace.package]

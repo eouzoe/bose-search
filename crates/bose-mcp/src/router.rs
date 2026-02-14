@@ -17,7 +17,7 @@ pub trait HasScore {
 /// # Examples
 ///
 /// ```
-/// use bose_mcp::router::QueryExpansionRouter;
+/// use bose_search::router::QueryExpansionRouter;
 ///
 /// let router = QueryExpansionRouter::default();
 /// // 使用 router.should_skip_expansion() 決定是否跳過擴展
@@ -79,12 +79,12 @@ impl QueryExpansionRouter {
     /// # Examples
     ///
     /// ```
-    /// use bose_mcp::router::QueryExpansionRouter;
+    /// use bose_search::router::QueryExpansionRouter;
     ///
     /// #[derive(Clone)]
     /// struct SearchResult { score: f64 }
     ///
-    /// impl bose_mcp::router::HasScore for SearchResult {
+    /// impl bose_search::router::HasScore for SearchResult {
     ///     fn score(&self) -> f64 { self.score }
     /// }
     ///

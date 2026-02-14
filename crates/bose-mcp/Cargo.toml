@@ -1,7 +1,16 @@
 [package]
-name = "bose-mcp"
+name = "bose-search"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+description = "Zero-cost meta-search MCP server for AI agents — 247 engines, local knowledge index, single binary."
+repository = "https://github.com/eouzoe/bose-search"
+keywords = ["mcp", "search", "ai-agent", "searxng", "tantivy"]
+categories = ["command-line-utilities", "web-programming"]
+
+[[bin]]
+name = "bose-search"
+path = "src/main.rs"
 
 [dependencies]
 bose-common = { path = "../bose-common" }
