@@ -4,6 +4,7 @@ pub struct BoseConfig {
     pub searxng_url: String,
     pub default_num_results: u32,
     pub request_timeout_secs: u64,
+    pub index_path: String,
 }
 
 impl Default for BoseConfig {
@@ -12,12 +13,19 @@ impl Default for BoseConfig {
             searxng_url: "http://localhost:8080".to_string(),
             default_num_results: 10,
             request_timeout_secs: 30,
+            index_path: dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("bose-search")
+                .join("index")
+                .to_string_lossy()
+                .into_owned(),
         }
     }
 }
 
 impl BoseConfig {
     pub fn from_env() -> Self {
+        let default = Self::default();
         Self {
             searxng_url: std::env::var("SEARXNG_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".to_string()),
@@ -29,6 +37,8 @@ impl BoseConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30),
+            index_path: std::env::var("BOSE_INDEX_PATH")
+                .unwrap_or(default.index_path),
         }
     }
 }
