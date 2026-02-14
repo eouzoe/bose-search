@@ -11,8 +11,13 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 url = { workspace = true }
+sysinfo = { workspace = true }
 
 bose-common = { path = "../bose-common" }
+
+[dependencies.monoio]
+workspace = true
+optional = true
 
 [dev-dependencies]
 tokio-test = { workspace = true }
@@ -20,4 +25,4 @@ wiremock = { workspace = true }
 
 [features]
 default = []
-# io-uring = ["monoio"]  # 未來啟用
+io-uring = ["monoio"]
