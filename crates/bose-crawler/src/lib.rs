@@ -5,6 +5,8 @@
 
 pub mod fetcher;
 pub mod metrics;
+pub mod monitor;
 
 pub use fetcher::{FetchError, FetchResult, Fetcher};
 pub use metrics::CrawlerMetrics;
+pub use monitor::{CpuMonitor, SystemMonitor, SystemSnapshot};

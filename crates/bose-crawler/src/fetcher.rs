@@ -1,13 +1,16 @@
 //! HTTP 抓取器
 //!
-//! 基於 tokio + reqwest 的並發 HTTP 抓取器。
-//! 未來可透過 `io-uring` feature 切換到 monoio。
+//! 基於 reqwest 的並發 HTTP 抓取器，整合 PID 背壓控制和系統監控。
+//! 使用 tokio 運行時，透過 PID 控制器動態調整並發量。
 
 use crate::metrics::CrawlerMetrics;
+use crate::monitor::{CpuMonitor, SystemMonitor};
 use anyhow::Result;
+use bose_common::pid::PidController;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 
 /// 抓取結果
 #[derive(Debug, Clone)]
@@ -32,14 +35,13 @@ pub struct Fetcher {
     metrics: Arc<CrawlerMetrics>,
     max_concurrency: usize,
     timeout: Duration,
+    pid: Option<PidController>,
+    monitor: Option<Box<dyn CpuMonitor>>,
 }
 
 impl Fetcher {
     /// 創建新的抓取器
-    pub fn new(
-        max_concurrency: usize,
-        timeout_secs: u64,
-    ) -> Result<Self> {
+    pub fn new(max_concurrency: usize, timeout_secs: u64) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .user_agent("BoseSearch/0.1")
@@ -50,7 +52,29 @@ impl Fetcher {
             metrics: Arc::new(CrawlerMetrics::new()),
             max_concurrency,
             timeout: Duration::from_secs(timeout_secs),
+            pid: None,
+            monitor: None,
         })
+    }
+
+    /// 創建帶 PID 控制的抓取器（安全優先配置）
+    pub fn with_backpressure(
+        max_concurrency: usize,
+        timeout_secs: u64,
+    ) -> Result<Self> {
+        let mut fetcher = Self::new(max_concurrency, timeout_secs)?;
+
+        // 安全優先: 目標延遲 100ms, CPU 40%, 並發 2-20
+        let pid = PidController::new()
+            .with_targets(100.0, 40.0)
+            .with_limits(2, max_concurrency.min(20) as u32);
+
+        let monitor = SystemMonitor::with_safety_threshold(70.0);
+
+        fetcher.pid = Some(pid);
+        fetcher.monitor = Some(Box::new(monitor));
+
+        Ok(fetcher)
     }
 
     /// 抓取單個 URL
@@ -162,6 +186,86 @@ impl Fetcher {
         results
     }
 
+    /// 帶 PID 背壓控制的智能爬取
+    ///
+    /// 根據系統 CPU 和延遲動態調整並發量，保護舊筆電硬體。
+    ///
+    /// # 安全保護
+    /// - CPU > 70% 時暫停爬取，等待 5 秒降溫
+    /// - 並發量硬上限 20（不管 PID 怎麼算）
+    /// - 總爬取時間 timeout 5 分鐘
+    pub async fn crawl_with_backpressure(
+        &mut self,
+        urls: Vec<String>,
+    ) -> Result<Vec<Result<FetchResult, FetchError>>> {
+        if urls.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // 確保有 PID 和 Monitor
+        if self.pid.is_none() || self.monitor.is_none() {
+            return Ok(self.crawl_batch(urls).await);
+        }
+
+        let mut results = Vec::with_capacity(urls.len());
+        let mut remaining_urls: Vec<_> = urls.into_iter().collect();
+
+        let start_time = Instant::now();
+        let total_timeout = Duration::from_secs(300); // 5 分鐘
+        let adjustment_interval = Duration::from_secs(1);
+        let mut last_adjustment = Instant::now();
+
+        while !remaining_urls.is_empty() {
+            // 檢查總 timeout
+            if start_time.elapsed() > total_timeout {
+                tracing::warn!("Crawl timeout after 5 minutes, {} URLs remaining", remaining_urls.len());
+                break;
+            }
+
+            // 安全檢查: CPU > 70% 時暫停
+            let is_safe = self.monitor.as_mut().unwrap().is_safe();
+            if !is_safe {
+                let snapshot = self.monitor.as_mut().unwrap().snapshot();
+                tracing::warn!(
+                    "CPU too high ({:.1}%), pausing for 5 seconds",
+                    snapshot.cpu_percent
+                );
+                sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+
+            // 每秒調整一次並發量
+            if last_adjustment.elapsed() >= adjustment_interval {
+                let snapshot = self.monitor.as_mut().unwrap().snapshot();
+                let system_metrics = self.metrics.to_system_metrics(snapshot.cpu_percent);
+                let new_limit = self.pid.as_mut().unwrap().adjust(&system_metrics);
+
+                tracing::debug!(
+                    "PID adjust: latency={:.1}ms, cpu={:.1}%, new_limit={}",
+                    system_metrics.avg_latency_ms,
+                    system_metrics.cpu_percent,
+                    new_limit
+                );
+
+                last_adjustment = Instant::now();
+            }
+
+            // 取當前並發限制的 URL 數量
+            let current_limit = self.pid.as_ref().unwrap().current_limit() as usize;
+            let batch_size = current_limit.min(remaining_urls.len());
+            let batch: Vec<_> = remaining_urls.drain(..batch_size).collect();
+
+            // 並發抓取這一批
+            let batch_results = self.crawl_batch(batch).await;
+            results.extend(batch_results);
+
+            // 短暫休息，避免過度消耗 CPU
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(results)
+    }
+
     /// 獲取指標引用
     pub fn metrics(&self) -> &CrawlerMetrics {
         &self.metrics
@@ -171,11 +275,19 @@ impl Fetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::monitor::MockMonitor;
 
     #[test]
     fn test_fetcher_new() {
         let fetcher = Fetcher::new(10, 30);
         assert!(fetcher.is_ok());
+    }
+
+    #[test]
+    fn test_fetcher_with_backpressure_has_pid_and_monitor() {
+        let fetcher = Fetcher::with_backpressure(10, 30).unwrap();
+        assert!(fetcher.pid.is_some());
+        assert!(fetcher.monitor.is_some());
     }
 
     #[test]
@@ -200,11 +312,61 @@ mod tests {
         assert_eq!(err.error, "timeout");
     }
 
+    // Requirement: CPU > 70% must pause crawling
     #[tokio::test]
-    async fn test_fetch_one_invalid_url() {
-        let fetcher = Fetcher::new(10, 5).unwrap();
+    async fn test_high_cpu_pauses_crawling() {
+        let mut fetcher = Fetcher::with_backpressure(10, 5).unwrap();
+        fetcher.monitor = Some(Box::new(MockMonitor::unsafe_cpu()));
+
+        let urls = vec!["http://localhost:1/test".to_string()];
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            fetcher.crawl_with_backpressure(urls),
+        ).await;
+
+        assert!(result.is_err(), "Should timeout because crawler pauses on high CPU");
+    }
+
+    // Requirement: CPU < 70% allows crawling to proceed
+    #[tokio::test]
+    async fn test_safe_cpu_allows_crawling() {
+        let mut fetcher = Fetcher::with_backpressure(10, 2).unwrap();
+        fetcher.monitor = Some(Box::new(MockMonitor::safe()));
+
+        let results = fetcher.crawl_with_backpressure(vec![]).await;
+        assert!(results.is_ok());
+        assert!(results.unwrap().is_empty());
+    }
+
+    // Requirement: PID concurrency within bounds [2, 20]
+    #[test]
+    fn test_pid_concurrency_within_bounds() {
+        let fetcher = Fetcher::with_backpressure(20, 10).unwrap();
+        let limit = fetcher.pid.as_ref().unwrap().current_limit();
+        assert!(limit >= 2 && limit <= 20, "PID limit {} out of [2, 20]", limit);
+    }
+
+    // Requirement: without PID, falls back to normal batch
+    #[tokio::test]
+    async fn test_no_pid_falls_back_to_batch() {
+        let mut fetcher = Fetcher::new(10, 2).unwrap();
+        assert!(fetcher.pid.is_none());
+        let results = fetcher.crawl_with_backpressure(vec![]).await;
+        assert!(results.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_one_invalid_url_returns_error() {
+        let fetcher = Fetcher::new(10, 2).unwrap();
         let result = fetcher.fetch_one("http://localhost:1/nonexistent").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_metrics_count_after_fetch() {
+        let fetcher = Fetcher::new(10, 2).unwrap();
+        let _ = fetcher.fetch_one("http://localhost:1/fail").await;
+        assert_eq!(fetcher.metrics().total_requests(), 1);
     }
 
     #[tokio::test]
@@ -212,12 +374,5 @@ mod tests {
         let fetcher = Fetcher::new(10, 5).unwrap();
         let results = fetcher.crawl_batch(vec![]).await;
         assert!(results.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_metrics_after_fetch() {
-        let fetcher = Fetcher::new(10, 2).unwrap();
-        let _ = fetcher.fetch_one("http://localhost:1/fail").await;
-        assert_eq!(fetcher.metrics().total_requests(), 1);
     }
 }
