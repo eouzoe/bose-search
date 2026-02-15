@@ -1,7 +1,7 @@
-//! HTTP 抓取器
+//! HTTP fetcher.
 //!
-//! 基於 reqwest 的並發 HTTP 抓取器，整合 PID 背壓控制和系統監控。
-//! 使用 tokio 運行時，透過 PID 控制器動態調整並發量。
+//! Concurrent HTTP fetcher built on reqwest with PID backpressure and system monitoring.
+//! Uses the tokio runtime with PID-controlled dynamic concurrency.
 
 use crate::metrics::CrawlerMetrics;
 use crate::monitor::{CpuMonitor, SystemMonitor};
@@ -29,7 +29,7 @@ pub struct FetchError {
     pub latency: Duration,
 }
 
-/// HTTP 抓取器
+/// HTTP fetcher.
 pub struct Fetcher {
     client: reqwest::Client,
     metrics: Arc<CrawlerMetrics>,
@@ -57,7 +57,7 @@ impl Fetcher {
         })
     }
 
-    /// 創建帶 PID 控制的抓取器（安全優先配置）
+    /// Create a fetcher with PID-controlled backpressure (safety-first config).
     pub fn with_backpressure(
         max_concurrency: usize,
         timeout_secs: u64,
@@ -77,7 +77,7 @@ impl Fetcher {
         Ok(fetcher)
     }
 
-    /// 抓取單個 URL
+    /// Fetch a single URL.
     pub async fn fetch_one(&self, url: &str) -> Result<FetchResult, FetchError> {
         let start = Instant::now();
 
@@ -118,7 +118,7 @@ impl Fetcher {
         }
     }
 
-    /// 批量抓取 URL (並發控制)
+    /// Fetch URLs in batch with concurrency control.
     pub async fn crawl_batch(&self, urls: Vec<String>) -> Vec<Result<FetchResult, FetchError>> {
         let semaphore = Arc::new(Semaphore::new(self.max_concurrency));
         let mut handles = Vec::with_capacity(urls.len());
@@ -186,14 +186,14 @@ impl Fetcher {
         results
     }
 
-    /// 帶 PID 背壓控制的智能爬取
+    /// Intelligent crawling with PID backpressure control.
     ///
-    /// 根據系統 CPU 和延遲動態調整並發量，保護舊筆電硬體。
+    /// Dynamically adjusts concurrency based on CPU and latency to protect hardware.
     ///
     /// # 安全保護
-    /// - CPU > 70% 時暫停爬取，等待 5 秒降溫
-    /// - 並發量硬上限 20（不管 PID 怎麼算）
-    /// - 總爬取時間 timeout 5 分鐘
+    /// - Pauses crawling when CPU > 70%, waits 5s to cool down
+    /// - Hard caps concurrency at 20 regardless of PID output
+    /// - Total crawl timeout: 5 minutes
     pub async fn crawl_with_backpressure(
         &mut self,
         urls: Vec<String>,

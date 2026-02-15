@@ -1,4 +1,4 @@
-//! SearXNG 客戶端 — 元搜尋引擎 HTTP 客戶端
+//! SearXNG client — meta-search engine HTTP interface.
 
 pub mod client;
 pub mod response;

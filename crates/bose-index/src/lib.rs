@@ -1,6 +1,6 @@
-//! Bose Search Engine — 本地索引引擎
+//! Bose Search Engine — local index engine.
 //!
-//! 基於 Tantivy 的本地知識庫索引。
+//! Local knowledge index built on Tantivy.
 
 pub mod indexer;
 pub mod schema;

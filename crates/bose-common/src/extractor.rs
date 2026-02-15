@@ -1,12 +1,12 @@
-//! HTML 內容提取器
+//! HTML content extractor.
 //!
-//! 將 HTML 轉換為純文字，用於知識收集管線。
+//! Converts HTML to plain text for the knowledge collection pipeline.
 
-/// 從 HTML 中提取純文字
+/// Extract plain text from HTML.
 ///
-/// 移除所有 HTML 標籤、script、style 內容，保留文字。
+/// Strips all HTML tags, script, and style elements, keeping only text.
 ///
-/// # 範例
+/// # Examples
 ///
 /// ```
 /// use bose_common::extractor::extract_text;
@@ -102,7 +102,7 @@ pub fn extract_text(html: &str) -> String {
     normalize_whitespace(&result)
 }
 
-/// 解碼 HTML 實體
+/// Decode HTML entities.
 fn decode_entity(chars: &[char], start: usize) -> Option<(char, usize)> {
     let mut end = start + 1;
     while end < chars.len() && end - start < 10 {

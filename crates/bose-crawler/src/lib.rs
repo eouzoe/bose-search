@@ -1,7 +1,7 @@
-//! Bose Search Engine — 爬蟲模組
+//! Bose Search Engine — crawler module.
 //!
-//! 基於 tokio + reqwest 的並發 HTTP 爬蟲。
-//! 未來可透過 `io-uring` feature 切換到 monoio。
+//! Concurrent HTTP crawler built on tokio + reqwest.
+//! Can switch to monoio via the `io-uring` feature in the future.
 
 pub mod fetcher;
 pub mod metrics;

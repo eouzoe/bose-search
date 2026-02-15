@@ -1,7 +1,7 @@
 use bose_common::{SearchResponse, SearchResult};
 use serde::Deserialize;
 
-/// SearXNG JSON 回應的頂層結構
+/// Top-level SearXNG JSON response.
 #[derive(Debug, Deserialize)]
 pub struct SearxngResponse {
     pub query: String,
@@ -14,7 +14,7 @@ pub struct SearxngResponse {
     pub unresponsive_engines: Vec<(String, String)>,
 }
 
-/// SearXNG 單個搜尋結果
+/// A single search result from SearXNG.
 #[derive(Debug, Deserialize)]
 pub struct SearxngResult {
     pub url: String,

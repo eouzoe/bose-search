@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 /// 內容去重器
 ///
-/// 使用 SHA-256 進行 content-addressable storage，確保相同內容只儲存一次。
+/// Uses SHA-256 for content-addressable storage, ensuring each piece of content is stored once.
 ///
 /// # Examples
 ///
@@ -19,7 +19,7 @@ use std::collections::HashSet;
 /// // 相同內容，返回相同 hash
 /// let hash2 = dedup.add_content("Hello, world!");
 /// assert_eq!(hash1, hash2);
-/// assert_eq!(dedup.len(), 1); // 仍然只有一個
+/// assert_eq!(dedup.len(), 1); // Still only one
 ///
 /// // 不同內容
 /// let hash3 = dedup.add_content("Different content");
@@ -40,17 +40,17 @@ impl Deduplicator {
         }
     }
 
-    /// 添加內容並返回 SHA-256 hash
+    /// Add content and return its SHA-256 hash.
     ///
     /// 如果內容已存在，返回現有的 hash。
     ///
     /// # Arguments
     ///
-    /// * `content` - 要去重的內容
+    /// * `content` — content to deduplicate
     ///
     /// # Returns
     ///
-    /// 返回內容的 SHA-256 hash (hex 編碼)
+    /// Returns the SHA-256 hash of the content (hex-encoded).
     pub fn add_content(&mut self, content: &str) -> String {
         let hash = compute_sha256(content);
         self.seen.insert(hash.clone());
@@ -61,11 +61,11 @@ impl Deduplicator {
     ///
     /// # Arguments
     ///
-    /// * `content` - 要檢查的內容
+    /// * `content` — content to check
     ///
     /// # Returns
     ///
-    /// 如果內容已存在返回 true，否則返回 false
+    /// Returns `true` if the content already exists, `false` otherwise.
     pub fn contains(&self, content: &str) -> bool {
         let hash = compute_sha256(content);
         self.seen.contains(&hash)
@@ -92,15 +92,15 @@ impl Deduplicator {
     }
 }
 
-/// 計算內容的 SHA-256 hash
+/// Compute the SHA-256 hash of content.
 ///
 /// # Arguments
 ///
-/// * `content` - 要計算 hash 的內容
+/// * `content` — content to hash
 ///
 /// # Returns
 ///
-/// 返回 SHA-256 hash (hex 編碼，64 字元)
+/// Returns the SHA-256 hash as a 64-character hex string.
 ///
 /// # Examples
 ///
@@ -121,7 +121,7 @@ pub fn compute_sha256(content: &str) -> String {
 ///
 /// # Arguments
 ///
-/// * `contents` - 內容列表
+/// * `contents` — list of content items
 ///
 /// # Returns
 ///
@@ -190,7 +190,7 @@ mod tests {
         // 相同內容
         let hash2 = dedup.add_content("Hello");
         assert_eq!(hash1, hash2);
-        assert_eq!(dedup.len(), 1); // 仍然只有一個
+        assert_eq!(dedup.len(), 1); // Still only one
 
         // 不同內容
         let hash3 = dedup.add_content("World");

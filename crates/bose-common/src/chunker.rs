@@ -1,15 +1,15 @@
-//! 文檔分塊模組
+//! Document chunking module
 //!
-//! 將長文檔切分為固定大小的塊，並保持塊之間的重疊以保留上下文。
+//! Splits long documents into fixed-size chunks with overlap to preserve context.
 //!
-//! # 設計
+//! # Design
 //!
-//! - **塊大小**: 800 tokens (可配置)
-//! - **重疊率**: 15% (120 tokens)
-//! - **分詞**: 簡單的空白字符分詞 (1 word ≈ 1.3 tokens)
-//! - **邊界**: 優先在句子邊界切分
+//! - **Chunk size**: 800 tokens (configurable)
+//! - **Overlap ratio**: 15% (120 tokens)
+//! - **Tokenization**: Simple whitespace splitting (1 word ≈ 1.3 tokens)
+//! - **Boundaries**: Prefer splitting at sentence boundaries
 //!
-//! # 範例
+//! # Examples
 //!
 //! ```
 //! use bose_common::chunker::Chunker;
@@ -23,28 +23,28 @@
 
 use std::cmp::min;
 
-/// 文檔分塊器
+/// Document chunker
 ///
-/// 將長文檔切分為固定大小的塊，並保持塊之間的重疊。
+/// Splits long documents into fixed-size chunks with overlap between chunks.
 #[derive(Debug, Clone)]
 pub struct Chunker {
-    /// 每個塊的目標 token 數量
+    /// Target number of tokens per chunk
     chunk_size: usize,
-    /// 塊之間的重疊比例 (0.0 - 1.0)
+    /// Overlap ratio between chunks (0.0 - 1.0)
     overlap_ratio: f64,
 }
 
 impl Chunker {
-    /// 創建新的分塊器
+    /// Create a new chunker
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `chunk_size`: 每個塊的目標 token 數量
-    /// - `overlap_ratio`: 塊之間的重疊比例 (0.0 - 1.0)
+    /// - `chunk_size`: Target number of tokens per chunk
+    /// - `overlap_ratio`: Overlap ratio between chunks (0.0 - 1.0)
     ///
     /// # Panics
     ///
-    /// 如果 `overlap_ratio` 不在 [0.0, 1.0) 範圍內會 panic
+    /// Panics if `overlap_ratio` is not in the range [0.0, 1.0)
     pub fn new(chunk_size: usize, overlap_ratio: f64) -> Self {
         assert!(
             (0.0..1.0).contains(&overlap_ratio),
@@ -58,20 +58,20 @@ impl Chunker {
         }
     }
 
-    /// 計算重疊的 token 數量
+    /// Calculate the number of overlapping tokens
     fn overlap_size(&self) -> usize {
         (self.chunk_size as f64 * self.overlap_ratio) as usize
     }
 
-    /// 將文本切分為塊
+    /// Split text into chunks.
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `text`: 要切分的文本
+    /// - `text`: the text to split
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// 文本塊的向量，每個塊都是原始文本的子字符串
+    /// A vector of text chunks, each a substring of the original.
     pub fn chunk(&self, text: &str) -> Vec<String> {
         if text.is_empty() {
             return vec![];

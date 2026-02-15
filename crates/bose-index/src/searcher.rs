@@ -1,6 +1,6 @@
 //! 查詢執行器
 //!
-//! 負責在 Tantivy 索引中執行搜尋查詢。
+//! Executes search queries against the Tantivy index.
 
 use crate::schema::fields;
 use anyhow::{Context, Result};
@@ -32,11 +32,11 @@ pub struct Searcher {
 impl Searcher {
     /// 創建新的查詢執行器
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `index_path`: 索引目錄路徑
+    /// - `index_path`: path to the index directory
     ///
-    /// # 範例
+    /// # Examples
     ///
     /// ```no_run
     /// use bose_index::searcher::Searcher;
@@ -58,12 +58,12 @@ impl Searcher {
 
     /// 搜尋索引
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `query`: 搜尋查詢字串
-    /// - `limit`: 返回結果數量上限
+    /// - `query`: search query string
+    /// - `limit`: maximum number of results to return
     ///
-    /// # 範例
+    /// # Examples
     ///
     /// ```no_run
     /// use bose_index::searcher::Searcher;

@@ -1,6 +1,6 @@
 //! 索引寫入器
 //!
-//! 負責將文檔寫入 Tantivy 索引。
+//! Writes documents into the Tantivy index.
 
 use crate::schema::{create_schema, fields};
 use anyhow::{Context, Result};
@@ -33,12 +33,12 @@ pub struct Indexer {
 impl Indexer {
     /// 創建新的索引寫入器
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `index_path`: 索引目錄路徑
-    /// - `heap_size_mb`: 寫入器堆大小 (MB)
+    /// - `index_path`: path to the index directory
+    /// - `heap_size_mb`: writer heap size in MB
     ///
-    /// # 範例
+    /// # Examples
     ///
     /// ```no_run
     /// use bose_index::indexer::Indexer;
@@ -71,11 +71,11 @@ impl Indexer {
 
     /// 添加單個文檔到索引
     ///
-    /// # 參數
+    /// # Arguments
     ///
-    /// - `doc`: 要索引的文檔
+    /// - `doc`: document to index
     ///
-    /// # 範例
+    /// # Examples
     ///
     /// ```no_run
     /// use bose_index::indexer::{Indexer, Document};

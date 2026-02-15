@@ -2,7 +2,7 @@ use crate::response::SearxngResponse;
 use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
 use std::time::Instant;
 
-/// SearXNG HTTP 客戶端
+/// SearXNG HTTP client.
 #[derive(Clone)]
 pub struct SearxngClient {
     http: reqwest::Client,

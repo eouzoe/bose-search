@@ -1,6 +1,6 @@
-//! Bose Search Engine — 共用類型
+//! Bose Search Engine — shared types.
 //!
-//! 所有 crate 共用的資料結構、錯誤類型、配置。
+//! Common data structures, error types, and configuration shared across all crates.
 
 pub mod blending;
 pub mod chunker;

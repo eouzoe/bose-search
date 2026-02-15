@@ -1,13 +1,13 @@
 //! 知識收集管線
 //!
 //! 將搜尋結果轉換為可索引的知識文檔。
-//! 流程: SearXNG 搜尋 → 內容提取 → 去重 → 文檔建立
+//! Pipeline: SearXNG search → content extraction → dedup → document creation.
 
 use crate::dedup::Deduplicator;
 use crate::extractor::extract_text;
 use serde::{Deserialize, Serialize};
 
-/// 知識文檔 (準備寫入 Tantivy 索引)
+/// A knowledge document ready for Tantivy indexing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeDoc {
     pub title: String,
@@ -29,7 +29,7 @@ pub struct RawPage {
 
 /// 知識收集管線
 ///
-/// # 範例
+/// # Examples
 ///
 /// ```
 /// use bose_common::pipeline::{Pipeline, RawPage};

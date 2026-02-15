@@ -1,18 +1,19 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-/// Trait for types that have a score
+/// Trait for types that carry a relevance score.
 ///
-/// 實作此 trait 的類型可以用於 `QueryExpansionRouter::should_skip_expansion()`
+/// Implementors can be fed into [`QueryExpansionRouter::should_skip_expansion`].
 pub trait HasScore {
-    /// 返回結果的分數（0.0 到 1.0）
+    /// Returns the relevance score in the range `0.0..=1.0`.
     fn score(&self) -> f64;
 }
 
-/// 查詢擴展路由器配置
+/// Decides whether query expansion is worth the extra latency.
 ///
-/// 根據搜尋結果的置信度決定是否跳過查詢擴展。
-/// 當 top score 足夠高且與第二名差距夠大時，跳過擴展以降低延遲。
+/// When the top result is already highly confident (score ≥ threshold)
+/// and clearly separated from the runner-up (gap ≥ threshold), expansion
+/// is skipped to save time.
 ///
 /// # Examples
 ///
@@ -20,13 +21,13 @@ pub trait HasScore {
 /// use bose_search::router::QueryExpansionRouter;
 ///
 /// let router = QueryExpansionRouter::default();
-/// // 使用 router.should_skip_expansion() 決定是否跳過擴展
+/// // Use router.should_skip_expansion() to decide
 /// ```
 #[derive(Debug, Clone)]
 pub struct QueryExpansionRouter {
-    /// Top score 閾值（預設 0.85）
+    /// Minimum top score to consider skipping (default: 0.85)
     skip_threshold: f64,
-    /// Score gap 閾值（預設 0.15）
+    /// Minimum gap between #1 and #2 (default: 0.15)
     gap_threshold: f64,
 }
 
@@ -40,11 +41,11 @@ impl Default for QueryExpansionRouter {
 }
 
 impl QueryExpansionRouter {
-    /// 從環境變數建立路由器
+    /// Build from environment variables.
     ///
-    /// 支援的環境變數：
-    /// - `QUERY_EXPANSION_SKIP_THRESHOLD`: Top score 閾值（預設 0.85）
-    /// - `QUERY_EXPANSION_GAP_THRESHOLD`: Gap 閾值（預設 0.15）
+    /// Reads:
+    /// - `QUERY_EXPANSION_SKIP_THRESHOLD` (default: 0.85)
+    /// - `QUERY_EXPANSION_GAP_THRESHOLD` (default: 0.15)
     pub fn from_env() -> Self {
         let skip_threshold = std::env::var("QUERY_EXPANSION_SKIP_THRESHOLD")
             .ok()
@@ -62,19 +63,18 @@ impl QueryExpansionRouter {
         }
     }
 
-    /// 決定是否跳過查詢擴展
+    /// Decide whether to skip query expansion.
     ///
-    /// 根據搜尋結果的置信度決定是否需要查詢擴展：
-    /// - 如果 top_score ≥ skip_threshold 且 gap ≥ gap_threshold，跳過擴展
-    /// - 否則，執行查詢擴展
+    /// Returns [`SkipDecision::skip`] = `true` when the top result is
+    /// confident enough on its own (score ≥ threshold, gap ≥ threshold).
     ///
     /// # Arguments
     ///
-    /// * `results` - 搜尋結果列表，必須實作 `HasScore` trait
+    /// * `results` — ranked search results implementing [`HasScore`]
     ///
     /// # Returns
     ///
-    /// 返回 `SkipDecision`，包含決策結果和原因
+    /// A [`SkipDecision`] with the verdict and supporting metrics.
     ///
     /// # Examples
     ///
@@ -110,11 +110,11 @@ impl QueryExpansionRouter {
 
         let top_score = results[0].score();
 
-        // 計算 gap
+        // Compute gap
         let gap = if results.len() > 1 {
             top_score - results[1].score()
         } else {
-            1.0 // 只有一個結果，gap 設為最大
+            1.0 // Single result — treat gap as maximum
         };
 
         let skip = top_score >= self.skip_threshold && gap >= self.gap_threshold;
@@ -146,19 +146,20 @@ impl QueryExpansionRouter {
     }
 }
 
-/// 跳過決策結果
+/// The outcome of a skip-expansion check.
 ///
-/// 包含決策結果、原因以及相關的分數資訊。
+/// Carries the boolean verdict, a human-readable reason, and the
+/// metrics that informed the decision.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkipDecision {
-    /// 是否跳過擴展
+    /// Whether expansion should be skipped
     pub skip: bool,
-    /// 決策原因
+    /// Human-readable explanation
     pub reason: String,
-    /// Top score（如果有結果）
+    /// Top result score, if any results were present
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_score: Option<f64>,
-    /// Score gap（如果有結果）
+    /// Gap between #1 and #2, if applicable
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gap: Option<f64>,
 }
@@ -167,7 +168,7 @@ pub struct SkipDecision {
 mod tests {
     use super::*;
 
-    // 模擬搜尋結果
+    // Mock search result for testing
     #[derive(Debug, Clone)]
     struct MockSearchResult {
         score: f64,
@@ -188,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_from_env_defaults() {
-        // 清除環境變數
+        // Clear env vars
         unsafe {
             std::env::remove_var("QUERY_EXPANSION_SKIP_THRESHOLD");
             std::env::remove_var("QUERY_EXPANSION_GAP_THRESHOLD");
@@ -210,14 +211,14 @@ mod tests {
         assert_eq!(router.skip_threshold, 0.9);
         assert_eq!(router.gap_threshold, 0.2);
 
-        // 清理
+        // Cleanup
         unsafe {
             std::env::remove_var("QUERY_EXPANSION_SKIP_THRESHOLD");
             std::env::remove_var("QUERY_EXPANSION_GAP_THRESHOLD");
         }
     }
 
-    // Scenario 1: 高置信度結果（跳過擴展）
+    // Scenario 1: high-confidence result — skip expansion
     #[test]
     fn test_skip_high_confidence() {
         let router = QueryExpansionRouter::default();
@@ -233,7 +234,7 @@ mod tests {
         assert!(decision.reason.contains("High confidence"));
     }
 
-    // Scenario 2: 低置信度結果（執行擴展）
+    // Scenario 2: low-confidence result — expand
     #[test]
     fn test_expand_low_confidence() {
         let router = QueryExpansionRouter::default();
@@ -245,12 +246,12 @@ mod tests {
         let decision = router.should_skip_expansion(&results);
         assert!(!decision.skip, "Should expand for low confidence");
         assert_eq!(decision.top_score, Some(0.78));
-        // 使用近似比較
+        // Approximate comparison
         assert!((decision.gap.unwrap() - 0.06).abs() < 0.001);
         assert!(decision.reason.contains("Low confidence"));
     }
 
-    // Scenario 3: 邊界條件（top score 剛好 0.85）
+    // Scenario 3: boundary — top score exactly at threshold
     #[test]
     fn test_boundary_skip() {
         let router = QueryExpansionRouter::default();
@@ -262,11 +263,11 @@ mod tests {
         let decision = router.should_skip_expansion(&results);
         assert!(decision.skip, "Should skip when score equals threshold");
         assert_eq!(decision.top_score, Some(0.85));
-        // 使用近似比較
+        // Approximate comparison
         assert!((decision.gap.unwrap() - 0.17).abs() < 0.001);
     }
 
-    // Scenario 4: 只有一個結果
+    // Scenario 4: single result
     #[test]
     fn test_single_result() {
         let router = QueryExpansionRouter::default();
@@ -278,7 +279,7 @@ mod tests {
         assert_eq!(decision.gap, Some(1.0));
     }
 
-    // Scenario 5: 空結果
+    // Scenario 5: empty results
     #[test]
     fn test_empty_results() {
         let router = QueryExpansionRouter::default();
@@ -291,7 +292,7 @@ mod tests {
         assert!(decision.reason.contains("No results"));
     }
 
-    // 邊界測試：gap 剛好等於閾值
+    // Boundary: gap exactly at threshold
     #[test]
     fn test_gap_boundary() {
         let router = QueryExpansionRouter::default();
@@ -304,7 +305,7 @@ mod tests {
         assert!(decision.skip, "Should skip when gap equals threshold");
     }
 
-    // 邊界測試：gap 略小於閾值
+    // Boundary: gap just below threshold
     #[test]
     fn test_gap_below_threshold() {
         let router = QueryExpansionRouter::default();

@@ -1,4 +1,4 @@
-//! 爬蟲指標收集
+//! Crawler metrics collection.
 //!
 //! 追蹤爬蟲的延遲、成功率、錯誤等指標。
 
@@ -68,7 +68,7 @@ impl CrawlerMetrics {
         self.total_bytes.load(Ordering::Relaxed)
     }
 
-    /// 轉換為 PID 控制器所需的 SystemMetrics
+    /// Convert to `SystemMetrics` for the PID controller.
     pub fn to_system_metrics(&self, cpu_percent: f64) -> bose_common::pid::SystemMetrics {
         bose_common::pid::SystemMetrics {
             avg_latency_ms: self.avg_latency_ms(),

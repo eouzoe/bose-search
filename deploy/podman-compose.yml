@@ -8,5 +8,5 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      - SEARXNG_SECRET=bose-search-secret-key-change-me
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-please-set-a-random-secret}
     restart: unless-stopped

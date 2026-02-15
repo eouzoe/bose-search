@@ -1,16 +1,16 @@
-//! PID 背壓控制器
+//! PID backpressure controller.
 //!
-//! 根據系統指標 (延遲、CPU) 動態調整並發量。
-//! 使用經典 PID 控制演算法，每秒調用一次。
+//! Dynamically adjusts concurrency based on system metrics (latency, CPU).
+//! Uses the classic PID control algorithm, called once per second.
 //!
-//! # 設計
+//! # Design
 //!
-//! - 目標延遲: 100ms
-//! - 目標 CPU: 60%
-//! - 並發範圍: [5, 200]
-//! - 多信號融合: max(latency_error, cpu_error * 2)
+//! - Target latency: 100ms
+//! - Target CPU: 60%
+//! - Concurrency range: [5, 200]
+//! - Multi-signal fusion: max(latency_error, cpu_error * 2)
 //!
-//! # 範例
+//! # Examples
 //!
 //! ```
 //! use bose_common::pid::{PidController, SystemMetrics};
@@ -30,11 +30,11 @@
 pub struct SystemMetrics {
     /// 平均延遲 (毫秒)
     pub avg_latency_ms: f64,
-    /// CPU 使用率 (百分比)
+    /// CPU usage (percentage)
     pub cpu_percent: f64,
 }
 
-/// PID 控制器
+/// PID controller.
 ///
 /// 使用比例-積分-微分控制來動態調整並發量。
 pub struct PidController {
@@ -58,7 +58,7 @@ pub struct PidController {
 }
 
 impl PidController {
-    /// 創建新的 PID 控制器 (預設參數)
+    /// Create a new PID controller with default parameters.
     pub fn new() -> Self {
         Self {
             kp: 0.5,
@@ -74,7 +74,7 @@ impl PidController {
         }
     }
 
-    /// 自訂 PID 增益
+    /// Customise PID gains.
     pub fn with_gains(mut self, kp: f64, ki: f64, kd: f64) -> Self {
         self.kp = kp;
         self.ki = ki;
@@ -134,7 +134,7 @@ impl PidController {
         self.current_limit as u32
     }
 
-    /// 重置 PID 狀態
+    /// Reset PID state.
     pub fn reset(&mut self) {
         self.integral = 0.0;
         self.prev_error = 0.0;

@@ -1,23 +1,23 @@
-//! Tantivy schema 定義
+//! Tantivy schema definition.
 //!
 //! 定義本地知識庫的索引結構。
 
 use tantivy::schema::*;
 
-/// 創建 Tantivy schema
+/// Create the Tantivy schema.
 ///
-/// # Schema 結構
+/// # Schema layout
 ///
-/// - `title`: 文檔標題 (全文搜尋 + 儲存)
-/// - `body`: 文檔內容 (全文搜尋 + 儲存)
-/// - `url`: 文檔 URL (字串 + 儲存)
-/// - `source`: 來源 (github/stackoverflow/docs.rs) (字串 + 儲存 + FAST)
-/// - `language`: 程式語言 (rust/python/go) (字串 + FAST)
-/// - `crawled_at`: 爬取時間 (日期 + 索引 + 儲存 + FAST)
-/// - `relevance_score`: 相關性分數 (f64 + 索引 + FAST)
-/// - `tags`: 標籤 (字串 + 儲存)
+/// - `title`: document title (full-text indexed + stored)
+/// - `body`: document body (full-text indexed + stored)
+/// - `url`: document URL (string + stored)
+/// - `source`: origin (github/stackoverflow/docs.rs) (string + stored + FAST)
+/// - `language`: programming language (rust/python/go) (string + FAST)
+/// - `crawled_at`: crawl timestamp (date + indexed + stored + FAST)
+/// - `relevance_score`: relevance score (f64 + indexed + FAST)
+/// - `tags`: tags (string + stored)
 ///
-/// # 範例
+/// # Examples
 ///
 /// ```
 /// use bose_index::schema::create_schema;
@@ -45,7 +45,7 @@ pub fn create_schema() -> Schema {
     builder.build()
 }
 
-/// Schema 欄位名稱常數
+/// Schema field name constants.
 pub mod fields {
     pub const TITLE: &str = "title";
     pub const BODY: &str = "body";

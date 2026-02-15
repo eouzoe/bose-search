@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-/// Reciprocal Rank Fusion (RRF) 演算法
+/// Reciprocal Rank Fusion (RRF) algorithm.
 ///
-/// 用於合併多個搜尋引擎的結果。基於排名而非分數，對異常值魯棒。
+/// Merges results from multiple search engines. Rank-based, robust to outliers.
 ///
 /// # Algorithm
 ///
@@ -10,10 +10,10 @@ use std::collections::HashMap;
 /// RRF_score = weight / (k + rank + 1)
 /// ```
 ///
-/// 其中：
-/// - k = 60 (常數，來自 Cormack et al. 2009)
-/// - rank 是結果在該引擎中的排名（0-based）
-/// - weight 是引擎權重
+/// Where:
+/// - k = 60 (constant, Cormack et al. 2009)
+/// - rank is the 0-based position in that engine
+/// - weight is the engine weight
 ///
 /// # Examples
 ///
@@ -36,15 +36,15 @@ use std::collections::HashMap;
 ///
 /// // 融合結果
 /// let fused = fusion.fuse(10);
-/// assert_eq!(fused[0].id, "doc2"); // doc2 在兩個引擎都排名靠前
+/// assert_eq!(fused[0].id, "doc2"); // doc2 ranks high in both engines
 /// ```
 #[derive(Debug, Clone)]
 pub struct RRFFusion {
-    /// RRF 常數 k（預設 60）
+    /// RRF constant k (default: 60)
     k: f64,
-    /// 累積的文檔分數
+    /// Accumulated document scores
     scores: HashMap<String, f64>,
-    /// 每個文檔的最佳排名（用於 top-rank 加成）
+    /// Best rank per document (for top-rank bonus)
     best_ranks: HashMap<String, usize>,
 }
 
@@ -55,7 +55,7 @@ impl Default for RRFFusion {
 }
 
 impl RRFFusion {
-    /// 建立新的 RRF 融合器
+    /// Create a new RRF fusion instance.
     pub fn new() -> Self {
         Self {
             k: 60.0,
@@ -64,7 +64,7 @@ impl RRFFusion {
         }
     }
 
-    /// 建立自訂 k 值的融合器
+    /// Create a fusion instance with a custom k value.
     pub fn with_k(k: f64) -> Self {
         Self {
             k,
@@ -73,21 +73,21 @@ impl RRFFusion {
         }
     }
 
-    /// 添加一個引擎的結果
+    /// Add results from one engine.
     ///
     /// # Arguments
     ///
-    /// * `source` - 引擎名稱（用於日誌）
-    /// * `results` - 排名結果列表
-    /// * `weight` - 引擎權重（原始查詢建議用 2.0）
+    /// * `source` — engine name (for logging)
+    /// * `results` — ranked result list
+    /// * `weight` — engine weight (use 2.0 for the original query)
     pub fn add_results(&mut self, _source: &str, results: Vec<RankedResult>, weight: f64) {
         for result in results {
             let rrf_score = weight / (self.k + result.rank as f64 + 1.0);
 
-            // 累積分數
+            // Accumulate score
             *self.scores.entry(result.id.clone()).or_insert(0.0) += rrf_score;
 
-            // 更新最佳排名
+            // Track best rank
             self.best_ranks
                 .entry(result.id.clone())
                 .and_modify(|best| *best = (*best).min(result.rank))
@@ -95,15 +95,15 @@ impl RRFFusion {
         }
     }
 
-    /// 融合結果並返回排序後的列表
+    /// Fuse and return results sorted by RRF score.
     ///
     /// # Arguments
     ///
-    /// * `top_n` - 返回前 N 個結果
+    /// * `top_n` — return the top N results
     ///
     /// # Returns
     ///
-    /// 返回按 RRF 分數排序的結果列表
+    /// Results sorted by descending RRF score.
     pub fn fuse(&self, top_n: usize) -> Vec<FusedResult> {
         let mut results: Vec<FusedResult> = self
             .scores
@@ -111,7 +111,7 @@ impl RRFFusion {
             .map(|(id, &score)| {
                 let best_rank = self.best_ranks.get(id).copied().unwrap_or(usize::MAX);
 
-                // Top-rank 加成
+                // Top-rank bonus
                 let bonus = match best_rank {
                     0 => 0.05,
                     1 => 0.03,
@@ -126,7 +126,7 @@ impl RRFFusion {
             })
             .collect();
 
-        // 按分數降序排序
+        // Sort by score descending
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -137,23 +137,23 @@ impl RRFFusion {
     }
 }
 
-/// 排名結果（輸入）
+/// A ranked result (input to fusion).
 #[derive(Debug, Clone)]
 pub struct RankedResult {
-    /// 文檔 ID
+    /// Document ID
     pub id: String,
-    /// 排名（0-based）
+    /// Rank (0-based)
     pub rank: usize,
 }
 
-/// 融合結果（輸出）
+/// A fused result (output of fusion).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FusedResult {
-    /// 文檔 ID
+    /// Document ID
     pub id: String,
-    /// RRF 分數
+    /// RRF score
     pub score: f64,
-    /// 最佳排名
+    /// Best rank across engines
     pub best_rank: usize,
 }
 
@@ -194,7 +194,7 @@ mod tests {
     fn test_two_engines_agreement() {
         let mut fusion = RRFFusion::new();
 
-        // 兩個引擎都認為 doc2 最好
+        // Both engines rank doc2 highly
         fusion.add_results(
             "engine_a",
             vec![
@@ -226,7 +226,7 @@ mod tests {
         );
 
         let fused = fusion.fuse(10);
-        // doc2 應該排第一（在兩個引擎都有好排名）
+        // doc2 should rank first (high in both engines)
         assert_eq!(fused[0].id, "doc2");
     }
 
@@ -234,7 +234,7 @@ mod tests {
     fn test_original_query_weight() {
         let mut fusion = RRFFusion::new();
 
-        // 原始查詢權重 ×2
+        // Original query weight ×2
         fusion.add_results(
             "original",
             vec![RankedResult {
@@ -244,7 +244,7 @@ mod tests {
             2.0,
         );
 
-        // 擴展查詢權重 ×1
+        // Expanded query weight ×1
         fusion.add_results(
             "expanded",
             vec![RankedResult {
@@ -255,7 +255,7 @@ mod tests {
         );
 
         let fused = fusion.fuse(10);
-        // doc1 應該排第一（權重更高）
+        // doc1 should rank first (higher weight)
         assert_eq!(fused[0].id, "doc1");
         assert!(fused[0].score > fused[1].score);
     }
@@ -270,15 +270,15 @@ mod tests {
                 RankedResult {
                     id: "doc1".to_string(),
                     rank: 0,
-                }, // 應該得到 +0.05 bonus
+                }, // Gets +0.05 bonus
                 RankedResult {
                     id: "doc2".to_string(),
                     rank: 1,
-                }, // 應該得到 +0.03 bonus
+                }, // Gets +0.03 bonus
                 RankedResult {
                     id: "doc3".to_string(),
                     rank: 2,
-                }, // 無 bonus
+                }, // No bonus
             ],
             1.0,
         );
@@ -288,8 +288,8 @@ mod tests {
         assert_eq!(fused[1].id, "doc2");
         assert_eq!(fused[2].id, "doc3");
 
-        // 驗證 bonus 有被加上
-        assert!(fused[0].score > 1.0 / 61.0 + 0.04); // 基礎分數 + bonus
+        // Verify bonus was applied
+        assert!(fused[0].score > 1.0 / 61.0 + 0.04); // Base score + bonus
     }
 
     #[test]
@@ -342,8 +342,8 @@ mod tests {
         );
 
         let fused = fusion.fuse(1);
-        // 使用 k=30 時，分數應該是 1/(30+0+1) = 1/31 ≈ 0.0323
-        // 加上 rank 0 的 bonus 0.05
+        // With k=30: score = 1/(30+0+1) + 0.05 bonus
+        
         assert!((fused[0].score - (1.0 / 31.0 + 0.05)).abs() < 0.001);
     }
 }

@@ -1,25 +1,25 @@
-//! 系統監控模組
+//! System monitoring module.
 //!
-//! 提供 CPU 和記憶體監控，保護舊筆電硬體安全。
+//! CPU and memory monitoring to protect hardware from overload.
 
 use sysinfo::System;
 
-/// CPU 監控 trait — 可注入 mock 用於測試
+/// CPU monitor trait — injectable for testing.
 pub trait CpuMonitor: Send {
     fn is_safe(&mut self) -> bool;
     fn snapshot(&mut self) -> SystemSnapshot;
 }
 
-/// 系統監控器
+/// System monitor.
 ///
-/// 監控 CPU 使用率和記憶體，提供安全閾值保護。
+/// Monitors CPU usage and memory, providing safety threshold protection.
 pub struct SystemMonitor {
     sys: System,
     safety_threshold_cpu: f64,
 }
 
 impl SystemMonitor {
-    /// 建立新的系統監控器，預設 CPU 安全閾值 70%
+    /// Create a new system monitor with default CPU safety threshold of 70%.
     pub fn new() -> Self {
         Self {
             sys: System::new_all(),
@@ -27,7 +27,7 @@ impl SystemMonitor {
         }
     }
 
-    /// 建立系統監控器並自訂 CPU 安全閾值
+    /// Create a system monitor with a custom CPU safety threshold.
     pub fn with_safety_threshold(cpu_percent: f64) -> Self {
         Self {
             sys: System::new_all(),
@@ -37,16 +37,16 @@ impl SystemMonitor {
 }
 
 impl CpuMonitor for SystemMonitor {
-    /// 檢查系統是否安全（CPU 使用率低於閾值）
+    /// Check whether the system is safe (CPU below threshold).
     fn is_safe(&mut self) -> bool {
         self.sys.refresh_cpu_usage();
         let cpu_percent = self.sys.global_cpu_usage() as f64;
         cpu_percent < self.safety_threshold_cpu
     }
 
-    /// 取得當前系統快照
+    /// Take a snapshot of current system metrics.
     ///
-    /// 會先刷新 CPU 使用率再讀取數據。
+    /// Refreshes CPU usage before reading.
     fn snapshot(&mut self) -> SystemSnapshot {
         self.sys.refresh_cpu_usage();
 
@@ -68,14 +68,14 @@ impl Default for SystemMonitor {
     }
 }
 
-/// 系統快照
+/// System snapshot.
 #[derive(Debug, Clone)]
 pub struct SystemSnapshot {
-    /// CPU 使用率百分比 (0-100)
+    /// CPU usage percentage (0–100)
     pub cpu_percent: f64,
-    /// 已使用記憶體 (MB)
+    /// Used memory (MB)
     pub memory_used_mb: u64,
-    /// 總記憶體 (MB)
+    /// Total memory (MB)
     pub memory_total_mb: u64,
 }
 
