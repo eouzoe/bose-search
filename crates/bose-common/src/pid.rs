@@ -121,10 +121,9 @@ impl PidController {
 
         // 調整並發量 (誤差正 → 降低並發)
         self.current_limit -= output;
-        self.current_limit = self.current_limit.clamp(
-            self.min_concurrency as f64,
-            self.max_concurrency as f64,
-        );
+        self.current_limit = self
+            .current_limit
+            .clamp(self.min_concurrency as f64, self.max_concurrency as f64);
 
         self.current_limit as u32
     }
@@ -173,7 +172,10 @@ mod tests {
             cpu_percent: 30.0,
         };
         let limit = pid.adjust(&metrics);
-        assert!(limit > 100, "Should increase concurrency under low load, got {limit}");
+        assert!(
+            limit > 100,
+            "Should increase concurrency under low load, got {limit}"
+        );
     }
 
     #[test]
@@ -185,7 +187,10 @@ mod tests {
             cpu_percent: 90.0,
         };
         let limit = pid.adjust(&metrics);
-        assert!(limit < 100, "Should decrease concurrency under high load, got {limit}");
+        assert!(
+            limit < 100,
+            "Should decrease concurrency under high load, got {limit}"
+        );
     }
 
     #[test]
@@ -199,7 +204,10 @@ mod tests {
         for _ in 0..100 {
             pid.adjust(&metrics);
         }
-        assert!(pid.current_limit() >= 5, "Should not go below min_concurrency");
+        assert!(
+            pid.current_limit() >= 5,
+            "Should not go below min_concurrency"
+        );
     }
 
     #[test]
@@ -213,7 +221,10 @@ mod tests {
         for _ in 0..100 {
             pid.adjust(&metrics);
         }
-        assert!(pid.current_limit() <= 200, "Should not exceed max_concurrency");
+        assert!(
+            pid.current_limit() <= 200,
+            "Should not exceed max_concurrency"
+        );
     }
 
     #[test]
@@ -275,7 +286,9 @@ mod tests {
             cpu_percent: 95.0,     // 遠超目標
         };
         let limit = pid.adjust(&metrics);
-        assert!(limit < 100, "CPU overload should reduce concurrency, got {limit}");
+        assert!(
+            limit < 100,
+            "CPU overload should reduce concurrency, got {limit}"
+        );
     }
 }
-

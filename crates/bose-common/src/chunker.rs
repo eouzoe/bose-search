@@ -211,10 +211,7 @@ mod tests {
 
             // 第二個塊的開頭應該與第一個塊的結尾有重疊
             let overlap_words = chunker.overlap_size() as f64 / 1.3;
-            assert!(
-                overlap_words > 0.0,
-                "Should have overlap between chunks"
-            );
+            assert!(overlap_words > 0.0, "Should have overlap between chunks");
         }
     }
 

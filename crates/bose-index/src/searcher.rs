@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tantivy::{
-    collector::TopDocs, query::QueryParser, schema::Value, Index, IndexReader, ReloadPolicy,
+    Index, IndexReader, ReloadPolicy, collector::TopDocs, query::QueryParser, schema::Value,
 };
 
 /// 搜尋結果
@@ -44,8 +44,7 @@ impl Searcher {
     /// let searcher = Searcher::new("./index").unwrap();
     /// ```
     pub fn new<P: AsRef<Path>>(index_path: P) -> Result<Self> {
-        let index = Index::open_in_dir(index_path)
-            .context("Failed to open index")?;
+        let index = Index::open_in_dir(index_path).context("Failed to open index")?;
 
         let reader = index
             .reader_builder()
@@ -135,7 +134,9 @@ impl Searcher {
             let tags_field = schema.get_field(fields::TAGS)?;
             let tags: Vec<String> = retrieved_doc
                 .get_all(tags_field)
-                .filter_map(|v: &tantivy::schema::OwnedValue| v.as_str().map(|s: &str| s.to_string()))
+                .filter_map(|v: &tantivy::schema::OwnedValue| {
+                    v.as_str().map(|s: &str| s.to_string())
+                })
                 .collect();
 
             results.push(SearchResult {
@@ -277,4 +278,3 @@ mod tests {
         assert!(result.search_score > 0.0);
     }
 }
-

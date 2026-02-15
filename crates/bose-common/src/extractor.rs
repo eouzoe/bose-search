@@ -56,11 +56,30 @@ pub fn extract_text(html: &str) -> String {
 
             // 塊級元素後加換行
             let block_tags = [
-                "p", "/p", "div", "/div", "br", "br/",
-                "h1", "/h1", "h2", "/h2", "h3", "/h3",
-                "h4", "/h4", "h5", "/h5", "h6", "/h6",
-                "li", "/li", "tr", "/tr",
-                "blockquote", "/blockquote",
+                "p",
+                "/p",
+                "div",
+                "/div",
+                "br",
+                "br/",
+                "h1",
+                "/h1",
+                "h2",
+                "/h2",
+                "h3",
+                "/h3",
+                "h4",
+                "/h4",
+                "h5",
+                "/h5",
+                "h6",
+                "/h6",
+                "li",
+                "/li",
+                "tr",
+                "/tr",
+                "blockquote",
+                "/blockquote",
             ];
             if block_tags.iter().any(|t| tag_lower == *t) {
                 result.push('\n');

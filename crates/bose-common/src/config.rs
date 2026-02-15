@@ -37,8 +37,7 @@ impl BoseConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30),
-            index_path: std::env::var("BOSE_INDEX_PATH")
-                .unwrap_or(default.index_path),
+            index_path: std::env::var("BOSE_INDEX_PATH").unwrap_or(default.index_path),
         }
     }
 }

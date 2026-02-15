@@ -7,9 +7,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tantivy::{
-    doc, Index, IndexWriter, TantivyDocument,
-};
+use tantivy::{Index, IndexWriter, TantivyDocument, doc};
 
 /// 要索引的文檔
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,13 +49,10 @@ impl Indexer {
 
         // 創建或打開索引
         let index = if index_path.join("meta.json").exists() {
-            Index::open_in_dir(index_path)
-                .context("Failed to open existing index")?
+            Index::open_in_dir(index_path).context("Failed to open existing index")?
         } else {
-            std::fs::create_dir_all(index_path)
-                .context("Failed to create index directory")?;
-            Index::create_in_dir(index_path, schema.clone())
-                .context("Failed to create index")?
+            std::fs::create_dir_all(index_path).context("Failed to create index directory")?;
+            Index::create_in_dir(index_path, schema.clone()).context("Failed to create index")?
         };
 
         // 創建寫入器

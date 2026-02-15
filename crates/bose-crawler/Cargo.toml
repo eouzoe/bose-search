@@ -3,6 +3,7 @@ name = "bose-crawler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "High-performance HTTP crawler with PID-based rate control and optional io_uring support"
 
 [dependencies]
 tokio = { workspace = true }

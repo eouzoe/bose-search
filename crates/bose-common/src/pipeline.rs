@@ -142,8 +142,16 @@ mod tests {
     fn test_pipeline_dedup() {
         let mut pipeline = Pipeline::new("rust", &[]);
         let pages = vec![
-            make_page("https://example.com/1", "Page 1", "<p>Content that is definitely long enough to pass the minimum body length filter requirement</p>"),
-            make_page("https://example.com/1", "Page 1 Dup", "<p>Different content but same URL should be deduped by the pipeline deduplication logic</p>"),
+            make_page(
+                "https://example.com/1",
+                "Page 1",
+                "<p>Content that is definitely long enough to pass the minimum body length filter requirement</p>",
+            ),
+            make_page(
+                "https://example.com/1",
+                "Page 1 Dup",
+                "<p>Different content but same URL should be deduped by the pipeline deduplication logic</p>",
+            ),
         ];
 
         let docs = pipeline.process(pages);
@@ -189,8 +197,16 @@ mod tests {
         assert_eq!(pipeline.processed_count(), 0);
 
         let pages = vec![
-            make_page("https://a.com", "A", "<p>Content A is long enough for the minimum body length filter</p>"),
-            make_page("https://b.com", "B", "<p>Content B is also long enough for the minimum body length filter</p>"),
+            make_page(
+                "https://a.com",
+                "A",
+                "<p>Content A is long enough for the minimum body length filter</p>",
+            ),
+            make_page(
+                "https://b.com",
+                "B",
+                "<p>Content B is also long enough for the minimum body length filter</p>",
+            ),
         ];
         pipeline.process(pages);
         assert_eq!(pipeline.processed_count(), 2);

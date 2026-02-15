@@ -111,16 +111,35 @@ impl BoseSearchServer {
 
         let limit = params.num_results.unwrap_or(10) as usize;
         match searcher.search(&params.query, limit) {
-            Ok(results) if results.is_empty() => Ok(CallToolResult::success(vec![Content::text(
-                format!("No local results for \"{}\". Index has {} documents.", params.query, searcher.num_docs()),
-            )])),
+            Ok(results) if results.is_empty() => {
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "No local results for \"{}\". Index has {} documents.",
+                    params.query,
+                    searcher.num_docs()
+                ))]))
+            }
             Ok(results) => {
                 let mut out = String::new();
-                writeln!(out, "Found {} local results for \"{}\":\n", results.len(), params.query).unwrap();
+                writeln!(
+                    out,
+                    "Found {} local results for \"{}\":\n",
+                    results.len(),
+                    params.query
+                )
+                .unwrap();
                 for (i, r) in results.iter().enumerate() {
                     writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
-                    writeln!(out, "   Score: {:.2} | Source: {} | Lang: {}", r.search_score, r.source, r.language).unwrap();
-                    let snippet = if r.body.len() > 200 { &r.body[..200] } else { &r.body };
+                    writeln!(
+                        out,
+                        "   Score: {:.2} | Source: {} | Lang: {}",
+                        r.search_score, r.source, r.language
+                    )
+                    .unwrap();
+                    let snippet = if r.body.len() > 200 {
+                        &r.body[..200]
+                    } else {
+                        &r.body
+                    };
                     writeln!(out, "   {snippet}").unwrap();
                     writeln!(out).unwrap();
                 }

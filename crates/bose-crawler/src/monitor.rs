@@ -160,13 +160,19 @@ mod tests {
     #[test]
     fn test_mock_unsafe_cpu_is_not_safe() {
         let mut mock = MockMonitor::unsafe_cpu();
-        assert!(!mock.is_safe(), "CPU 85% should NOT be safe (threshold 70%)");
+        assert!(
+            !mock.is_safe(),
+            "CPU 85% should NOT be safe (threshold 70%)"
+        );
     }
 
     #[test]
     fn test_mock_custom_threshold() {
         let mut mock = MockMonitor::with_cpu(60.0, 50.0);
-        assert!(!mock.is_safe(), "CPU 60% should NOT be safe (threshold 50%)");
+        assert!(
+            !mock.is_safe(),
+            "CPU 60% should NOT be safe (threshold 50%)"
+        );
 
         let mut mock2 = MockMonitor::with_cpu(40.0, 50.0);
         assert!(mock2.is_safe(), "CPU 40% should be safe (threshold 50%)");

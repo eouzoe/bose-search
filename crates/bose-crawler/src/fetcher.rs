@@ -58,10 +58,7 @@ impl Fetcher {
     }
 
     /// Create a fetcher with PID-controlled backpressure (safety-first config).
-    pub fn with_backpressure(
-        max_concurrency: usize,
-        timeout_secs: u64,
-    ) -> Result<Self> {
+    pub fn with_backpressure(max_concurrency: usize, timeout_secs: u64) -> Result<Self> {
         let mut fetcher = Self::new(max_concurrency, timeout_secs)?;
 
         // 安全優先: 目標延遲 100ms, CPU 40%, 並發 2-20
@@ -218,7 +215,10 @@ impl Fetcher {
         while !remaining_urls.is_empty() {
             // 檢查總 timeout
             if start_time.elapsed() > total_timeout {
-                tracing::warn!("Crawl timeout after 5 minutes, {} URLs remaining", remaining_urls.len());
+                tracing::warn!(
+                    "Crawl timeout after 5 minutes, {} URLs remaining",
+                    remaining_urls.len()
+                );
                 break;
             }
 
@@ -322,9 +322,13 @@ mod tests {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             fetcher.crawl_with_backpressure(urls),
-        ).await;
+        )
+        .await;
 
-        assert!(result.is_err(), "Should timeout because crawler pauses on high CPU");
+        assert!(
+            result.is_err(),
+            "Should timeout because crawler pauses on high CPU"
+        );
     }
 
     // Requirement: CPU < 70% allows crawling to proceed
@@ -343,7 +347,11 @@ mod tests {
     fn test_pid_concurrency_within_bounds() {
         let fetcher = Fetcher::with_backpressure(20, 10).unwrap();
         let limit = fetcher.pid.as_ref().unwrap().current_limit();
-        assert!(limit >= 2 && limit <= 20, "PID limit {} out of [2, 20]", limit);
+        assert!(
+            limit >= 2 && limit <= 20,
+            "PID limit {} out of [2, 20]",
+            limit
+        );
     }
 
     // Requirement: without PID, falls back to normal batch

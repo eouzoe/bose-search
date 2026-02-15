@@ -3,6 +3,7 @@ name = "bose-index"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Tantivy-based local search index with RRF fusion and position-aware ranking"
 
 [dependencies]
 tantivy = { workspace = true }

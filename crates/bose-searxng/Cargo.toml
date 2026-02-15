@@ -2,6 +2,7 @@
 name = "bose-searxng"
 version.workspace = true
 edition.workspace = true
+description = "SearXNG HTTP client for meta-search across 247 search engines"
 
 [dependencies]
 bose-common = { path = "../bose-common" }

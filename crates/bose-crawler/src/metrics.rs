@@ -26,8 +26,7 @@ impl CrawlerMetrics {
         self.successful_requests.fetch_add(1, Ordering::Relaxed);
         self.total_latency_us
             .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
-        self.total_bytes
-            .fetch_add(bytes as u64, Ordering::Relaxed);
+        self.total_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
 
     /// 記錄失敗的請求

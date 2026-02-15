@@ -343,7 +343,7 @@ mod tests {
 
         let fused = fusion.fuse(1);
         // With k=30: score = 1/(30+0+1) + 0.05 bonus
-        
+
         assert!((fused[0].score - (1.0 / 31.0 + 0.05)).abs() < 0.001);
     }
 }
