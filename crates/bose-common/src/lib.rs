@@ -10,7 +10,6 @@ pub mod error;
 pub mod extractor;
 pub mod fusion;
 pub mod pid;
-pub mod pipeline;
 pub mod types;
 
 pub use blending::*;
@@ -21,5 +20,4 @@ pub use error::*;
 pub use extractor::*;
 pub use fusion::*;
 pub use pid::*;
-pub use pipeline::*;
 pub use types::*;

@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical Details
 - 5 crates: bose-common, bose-searxng, bose-search, bose-index, bose-crawler
-- 25 Rust source files
-- 16 unit tests
+- 25 Rust source files, ~4,474 lines of code
+- 128 tests across 5 crates
 - Zero clippy warnings
 - Rust 2024 edition

@@ -52,6 +52,8 @@ crates/
 └── bose-crawler/    Content fetcher with PID backpressure control
 ```
 
+> **Note**: `bose-crawler` is included as an experimental crate. It provides PID-controlled rate limiting and HTTP fetching primitives but is not yet integrated into the main binary.
+
 ## Configuration
 
 All settings are read from environment variables.
