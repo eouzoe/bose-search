@@ -12,7 +12,7 @@ Paid search APIs burn through credits remarkably fast. Built-in LLM search is sl
 - **Local index** — Sub-10ms full-text search over crawled content via Tantivy
 - **MCP native** — Works with Claude Code, Cursor, Windsurf, and any MCP-compatible client
 - **Self-hosted** — Your queries never leave your machine
-- **Single binary** — One 8 MB Rust executable, minimal resource footprint
+- **Single binary** — One Rust executable, minimal resource footprint
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ Your AI agent now has access to 247 search engines.
 
 ```
 crates/
-├── bose-mcp/        MCP server entry point (rmcp 0.14)
+├── bose-search/     MCP server entry point (rmcp 0.14)
 ├── bose-searxng/    SearXNG HTTP client
 ├── bose-common/     Shared types, configuration, algorithms
 ├── bose-index/      Tantivy local index
@@ -53,6 +53,28 @@ crates/
 ```
 
 > **Note**: `bose-crawler` is included as an experimental crate. It provides PID-controlled rate limiting and HTTP fetching primitives but is not yet integrated into the main binary.
+
+## Algorithms
+
+Bose implements several ranking and processing algorithms:
+
+- **RRF Fusion** (`bose-common/fusion.rs`) — Reciprocal Rank Fusion merges ranked lists from multiple search engines into a single ordering, without needing score calibration across sources.
+- **Position-aware Blending** (`bose-common/blending.rs`) — Interleaves results from different backends while preserving positional relevance signals.
+- **PID Backpressure** (`bose-crawler/pid.rs`) — A proportional-integral-derivative controller that dynamically adjusts crawl rate based on server response latency, preventing overload.
+- **SHA-256 Deduplication** (`bose-common/dedup.rs`) — Content-hash based dedup that eliminates duplicate results across engines.
+- **Document Chunking** (`bose-common/chunker.rs`) — Splits large documents into indexable segments with configurable overlap for context preservation.
+- **HTML Extraction** (`bose-common/extractor.rs`) — Strips markup to extract clean text content for indexing.
+- **Query Expansion Router** (`bose-search/router.rs`) — Routes queries to the optimal combination of backends based on query characteristics.
+
+## SearXNG Deployment
+
+Bose uses [SearXNG](https://docs.searxng.org/) as its meta-search backend. A `podman-compose.yml` is included in `deploy/`:
+
+```bash
+cd deploy && podman-compose up -d
+```
+
+This starts SearXNG on port 8080 with JSON API enabled and 4 default engines (Google, Brave, DuckDuckGo, Startpage). You can add more engines by editing `deploy/searxng/settings.yml`.
 
 ## Configuration
 
@@ -75,6 +97,12 @@ cargo build --release -p bose-search
 
 The binary will be at `target/release/bose-search`.
 
+## Vision
+
+Search engines surface what's popular, promoted, and paid for. Countless works — small projects, niche research, personal creations — get buried and forgotten over time.
+
+Bose aims to change that. Beyond conventional search, we're building a "scavenging" algorithm inspired by biological decomposition and swarm intelligence: finding value in what others overlook. The long-term goal is to break through the filter bubble and help people discover content they'd never encounter through mainstream channels.
+
 ## Roadmap
 
 - [x] SearXNG meta-search integration (247 engines)
@@ -82,9 +110,10 @@ The binary will be at `target/release/bose-search`.
 - [x] Local Tantivy knowledge index with full-text search
 - [x] Content crawler with PID-controlled backpressure
 - [ ] Streaming hybrid results — local results first, web results as they arrive
-- [ ] Plugin system for custom search backends
-- [ ] SIMD-accelerated BM25 scoring engine
+- [ ] "Scavenging" algorithm — surface overlooked and forgotten content
+- [ ] SIMD-accelerated BM25 scoring engine (Block-Max WAND)
 - [ ] io_uring async I/O via monoio
+- [ ] Plugin system for custom search backends
 
 ## Licence
 
