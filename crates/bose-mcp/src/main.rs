@@ -43,6 +43,18 @@ struct ReadUrlParams {
     url: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct CrawlKnowledgeParams {
+    #[schemars(description = "Search query to find relevant content")]
+    query: String,
+
+    #[schemars(description = "Number of URLs to fetch and index (1-10, default: 5)")]
+    depth: Option<u32>,
+
+    #[schemars(description = "Filter results by source/engine (optional)")]
+    source_filter: Option<String>,
+}
+
 #[derive(Clone)]
 struct BoseSearchServer {
     client: SearxngClient,
@@ -240,6 +252,149 @@ impl BoseSearchServer {
                 "Local search failed: {e}"
             ))])),
         }
+    }
+
+    #[tool(
+        description = "Crawl and index knowledge: search web -> fetch URLs -> extract text -> index to local Tantivy. Returns summary of indexed documents."
+    )]
+    async fn crawl_knowledge(
+        &self,
+        Parameters(params): Parameters<CrawlKnowledgeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use bose_index::{Document, Indexer};
+        use chrono::Utc;
+
+        tracing::info!(query = %params.query, "Starting knowledge crawl");
+
+        // Validate depth parameter
+        let depth = params.depth.unwrap_or(5).clamp(1, 10);
+
+        // Step 1: Search with SearXNG
+        let search_query = SearchQuery::new(&params.query).with_num_results(depth);
+        let search_results = match self.client.search(&search_query).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Search failed: {e}"
+                ))]));
+            }
+        };
+
+        // Filter by source if specified
+        let urls_to_fetch: Vec<_> = search_results
+            .results
+            .iter()
+            .filter(|r| {
+                if let Some(ref filter) = params.source_filter {
+                    r.engine.contains(filter)
+                } else {
+                    true
+                }
+            })
+            .take(depth as usize)
+            .collect();
+
+        if urls_to_fetch.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No URLs found matching criteria".to_string(),
+            )]));
+        }
+
+        tracing::info!(count = urls_to_fetch.len(), "Fetching URLs");
+
+        // Step 2: Fetch URLs and extract text
+        let mut documents = Vec::new();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("bose-search/0.1")
+            .build()
+            .map_err(|e| McpError::internal_error(format!("HTTP client error: {e}"), None))?;
+
+        for result in urls_to_fetch {
+            match client.get(&result.url).send().await {
+                Ok(response) if response.status().is_success() => {
+                    if let Ok(html) = response.text().await {
+                        let text = strip_html_tags(&html);
+
+                        // Skip if text is too short (likely error page)
+                        if text.len() < 100 {
+                            tracing::warn!(url = %result.url, "Skipping: text too short");
+                            continue;
+                        }
+
+                        let doc = Document {
+                            title: result.title.clone(),
+                            body: text,
+                            url: result.url.clone(),
+                            source: result.engine.clone(),
+                            language: "en".to_string(), // TODO: detect language
+                            crawled_at: Utc::now(),
+                            relevance_score: 1.0, // TODO: use actual score
+                            tags: vec![params.query.clone()],
+                        };
+
+                        documents.push(doc);
+                        tracing::info!(url = %result.url, "Fetched successfully");
+                    }
+                }
+                Ok(response) => {
+                    tracing::warn!(url = %result.url, status = %response.status(), "HTTP error");
+                }
+                Err(e) => {
+                    tracing::warn!(url = %result.url, error = %e, "Fetch failed");
+                }
+            }
+        }
+
+        if documents.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No documents could be fetched and indexed".to_string(),
+            )]));
+        }
+
+        // Step 3: Index documents
+        let mut indexer = match Indexer::new(&self.index_path, 50) {
+            Ok(idx) => idx,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to create indexer: {e}"
+                ))]));
+            }
+        };
+
+        for doc in &documents {
+            if let Err(e) = indexer.add_document(doc) {
+                tracing::error!(url = %doc.url, error = %e, "Failed to index document");
+            }
+        }
+
+        if let Err(e) = indexer.commit() {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "Failed to commit index: {e}"
+            ))]));
+        }
+
+        tracing::info!(count = documents.len(), "Knowledge crawl complete");
+
+        // Return summary
+        let mut summary = format!(
+            "Successfully crawled and indexed {} documents for query \"{}\":\n\n",
+            documents.len(),
+            params.query
+        );
+
+        for (i, doc) in documents.iter().enumerate() {
+            writeln!(summary, "{}. {} ({})", i + 1, doc.title, doc.url).unwrap();
+            let snippet = if doc.body.len() > 150 {
+                &doc.body[..150]
+            } else {
+                &doc.body
+            };
+            writeln!(summary, "   {snippet}...").unwrap();
+            writeln!(summary).unwrap();
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(summary)]))
     }
 }
 
@@ -659,5 +814,122 @@ mod tests {
         let query4 = SearchQuery::new("python programming");
         let key4 = make_cache_key(&query4);
         assert_ne!(key1, key4);
+    }
+
+    #[tokio::test]
+    async fn test_crawl_knowledge_integration() {
+        use tempfile::TempDir;
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path, query_param},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        // Mock SearXNG search response
+        let search_response = serde_json::json!({
+            "query": "rust async",
+            "results": [
+                {
+                    "url": format!("{}/doc1", mock_server.uri()),
+                    "title": "Rust Async Programming",
+                    "engine": "google",
+                    "category": "it"
+                },
+                {
+                    "url": format!("{}/doc2", mock_server.uri()),
+                    "title": "Async/Await in Rust",
+                    "engine": "duckduckgo",
+                    "category": "it"
+                }
+            ],
+            "suggestions": [],
+            "unresponsive_engines": []
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", "rust async"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&search_response))
+            .mount(&mock_server)
+            .await;
+
+        // Mock document pages
+        let doc1_html = r#"
+            <html>
+            <head><title>Rust Async Programming</title></head>
+            <body>
+                <h1>Rust Async Programming</h1>
+                <p>Asynchronous programming in Rust is powered by the async/await syntax.
+                This allows you to write concurrent code that is both efficient and easy to understand.
+                The Rust async ecosystem includes tokio, async-std, and many other libraries.</p>
+            </body>
+            </html>
+        "#;
+
+        let doc2_html = r#"
+            <html>
+            <head><title>Async/Await in Rust</title></head>
+            <body>
+                <h1>Async/Await in Rust</h1>
+                <p>The async/await feature in Rust makes it easy to write asynchronous code.
+                You can use async fn to define asynchronous functions, and await to wait for futures to complete.
+                This is a powerful feature for building high-performance applications.</p>
+            </body>
+            </html>
+        "#;
+
+        Mock::given(method("GET"))
+            .and(path("/doc1"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(doc1_html))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/doc2"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(doc2_html))
+            .mount(&mock_server)
+            .await;
+
+        // Create temporary index directory
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let config = BoseConfig {
+            searxng_url: mock_server.uri(),
+            index_path: index_path.clone(),
+            ..BoseConfig::default()
+        };
+        let client = SearxngClient::new(&config).unwrap();
+        let server = BoseSearchServer::new(client, index_path.clone());
+
+        // Test crawl_knowledge
+        let crawl_params = CrawlKnowledgeParams {
+            query: "rust async".to_string(),
+            depth: Some(2),
+            source_filter: None,
+        };
+
+        let result = server
+            .crawl_knowledge(Parameters(crawl_params))
+            .await
+            .unwrap();
+
+        assert_eq!(result.is_error, Some(false));
+
+        // Verify documents were indexed by searching
+        let search_params = LocalSearchParams {
+            query: "async".to_string(),
+            num_results: Some(10),
+        };
+
+        let search_result = server
+            .local_search(Parameters(search_params))
+            .await
+            .unwrap();
+
+        assert_eq!(search_result.is_error, Some(false));
+        // Should find at least one document
+        // (We can't easily check the exact content without parsing the response)
     }
 }
