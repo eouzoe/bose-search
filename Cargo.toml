@@ -33,3 +33,4 @@ tantivy = "0.22"
 monoio = { version = "0.2", features = ["iouring", "macros"] }
 sysinfo = "0.33"
 dirs = "6"
+moka = { version = "0.12", features = ["future"] }

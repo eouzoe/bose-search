@@ -25,6 +25,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true }
+moka = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

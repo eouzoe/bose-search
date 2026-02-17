@@ -1,14 +1,16 @@
 use bose_common::*;
 use bose_index::searcher::Searcher;
 use bose_searxng::SearxngClient;
+use moka::future::Cache;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters, model::*, schemars, tool, tool_handler, tool_router,
     transport::stdio,
 };
 use std::fmt::Write;
+use std::time::Duration;
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema, Clone)]
 struct WebSearchParams {
     #[schemars(description = "The search query")]
     query: String,
@@ -46,15 +48,23 @@ struct BoseSearchServer {
     client: SearxngClient,
     index_path: String,
     tool_router: ToolRouter<Self>,
+    cache: Cache<String, SearchResponse>,
 }
 
 #[tool_router]
 impl BoseSearchServer {
     fn new(client: SearxngClient, index_path: String) -> Self {
+        // Create cache with 5min TTL and max 1000 entries
+        let cache = Cache::builder()
+            .max_capacity(1000)
+            .time_to_live(Duration::from_secs(5 * 60))
+            .build();
+
         Self {
             client,
             index_path,
             tool_router: Self::tool_router(),
+            cache,
         }
     }
 
@@ -74,10 +84,29 @@ impl BoseSearchServer {
         query.language = params.language;
         query.time_range = params.time_range;
 
+        // Generate cache key
+        let cache_key = make_cache_key(&query);
+
+        // Check cache first
+        if let Some(cached_resp) = self.cache.get(&cache_key).await {
+            tracing::info!(query = %query.query, "Cache hit");
+            return Ok(CallToolResult::success(vec![Content::text(
+                format_response(&cached_resp),
+            )]));
+        }
+
+        tracing::info!(query = %query.query, "Cache miss");
+
+        // Cache miss - fetch from SearXNG
         match self.client.search(&query).await {
-            Ok(resp) => Ok(CallToolResult::success(vec![Content::text(
-                format_response(&resp),
-            )])),
+            Ok(resp) => {
+                // Store in cache
+                self.cache.insert(cache_key, resp.clone()).await;
+
+                Ok(CallToolResult::success(vec![Content::text(
+                    format_response(&resp),
+                )]))
+            }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Search failed: {e}"
             ))])),
@@ -302,6 +331,23 @@ fn strip_html_tags(html: &str) -> String {
     result.split_whitespace().collect::<Vec<&str>>().join(" ")
 }
 
+/// Generate a cache key from search query and parameters.
+/// Uses a simple string concatenation approach for deterministic keys.
+fn make_cache_key(query: &SearchQuery) -> String {
+    let mut key = format!("q:{}", query.query);
+    key.push_str(&format!("|n:{}", query.num_results));
+    if let Some(ref cat) = query.category {
+        key.push_str(&format!("|c:{}", cat));
+    }
+    if let Some(ref lang) = query.language {
+        key.push_str(&format!("|l:{}", lang));
+    }
+    if let Some(ref tr) = query.time_range {
+        key.push_str(&format!("|t:{}", tr));
+    }
+    key
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing → stderr (stdout reserved for MCP JSON-RPC)
@@ -466,5 +512,152 @@ mod tests {
         assert_eq!(result.is_error, Some(false));
         assert_eq!(result.content.len(), 1);
         // Content should be truncated
+    }
+
+    #[tokio::test]
+    async fn test_web_search_cache_hit() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path, query_param},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        let mock_response = serde_json::json!({
+            "query": "rust",
+            "results": [{
+                "url": "https://rust-lang.org",
+                "title": "Rust",
+                "engine": "google",
+                "category": "general"
+            }],
+            "suggestions": [],
+            "unresponsive_engines": []
+        });
+
+        // Mock should only be called once
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", "rust"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&mock_response))
+            .expect(1) // Only expect one call
+            .mount(&mock_server)
+            .await;
+
+        let config = BoseConfig {
+            searxng_url: mock_server.uri(),
+            ..BoseConfig::default()
+        };
+        let client = SearxngClient::new(&config).unwrap();
+        let server = BoseSearchServer::new(client, config.index_path);
+
+        let params = WebSearchParams {
+            query: "rust".to_string(),
+            num_results: Some(10),
+            category: None,
+            language: None,
+            time_range: None,
+        };
+
+        // First call - cache miss
+        let result1 = server.web_search(Parameters(params.clone())).await.unwrap();
+        assert_eq!(result1.is_error, Some(false));
+
+        // Second call - cache hit (mock should not be called again)
+        let result2 = server.web_search(Parameters(params)).await.unwrap();
+        assert_eq!(result2.is_error, Some(false));
+
+        // Results should be identical
+        assert_eq!(result1.content.len(), result2.content.len());
+    }
+
+    #[tokio::test]
+    async fn test_web_search_cache_ttl() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path, query_param},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        let mock_response = serde_json::json!({
+            "query": "test",
+            "results": [{
+                "url": "https://example.com",
+                "title": "Test",
+                "engine": "google",
+                "category": "general"
+            }],
+            "suggestions": [],
+            "unresponsive_engines": []
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", "test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&mock_response))
+            .mount(&mock_server)
+            .await;
+
+        // Create server with very short TTL for testing
+        let config = BoseConfig {
+            searxng_url: mock_server.uri(),
+            ..BoseConfig::default()
+        };
+        let client = SearxngClient::new(&config).unwrap();
+
+        // Create cache with 1 second TTL for testing
+        let cache = Cache::builder()
+            .max_capacity(1000)
+            .time_to_live(Duration::from_secs(1))
+            .build();
+
+        let server = BoseSearchServer {
+            client,
+            index_path: config.index_path,
+            tool_router: BoseSearchServer::tool_router(),
+            cache,
+        };
+
+        let params = WebSearchParams {
+            query: "test".to_string(),
+            num_results: Some(10),
+            category: None,
+            language: None,
+            time_range: None,
+        };
+
+        // First call
+        let result1 = server.web_search(Parameters(params.clone())).await.unwrap();
+        assert_eq!(result1.is_error, Some(false));
+
+        // Wait for TTL to expire
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Second call after TTL - should fetch again
+        let result2 = server.web_search(Parameters(params)).await.unwrap();
+        assert_eq!(result2.is_error, Some(false));
+    }
+
+    #[test]
+    fn test_make_cache_key() {
+        let query1 = SearchQuery::new("rust programming");
+        let key1 = make_cache_key(&query1);
+        assert!(key1.contains("q:rust programming"));
+        assert!(key1.contains("|n:10"));
+
+        let query2 = SearchQuery::new("rust").with_category("it");
+        let key2 = make_cache_key(&query2);
+        assert!(key2.contains("|c:it"));
+
+        // Same query should produce same key
+        let query3 = SearchQuery::new("rust programming");
+        let key3 = make_cache_key(&query3);
+        assert_eq!(key1, key3);
+
+        // Different query should produce different key
+        let query4 = SearchQuery::new("python programming");
+        let key4 = make_cache_key(&query4);
+        assert_ne!(key1, key4);
     }
 }
