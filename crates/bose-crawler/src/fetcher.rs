@@ -348,7 +348,7 @@ mod tests {
         let fetcher = Fetcher::with_backpressure(20, 10).unwrap();
         let limit = fetcher.pid.as_ref().unwrap().current_limit();
         assert!(
-            limit >= 2 && limit <= 20,
+            (2..=20).contains(&limit),
             "PID limit {} out of [2, 20]",
             limit
         );
