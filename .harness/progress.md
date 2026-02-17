@@ -12,7 +12,7 @@
 
 ### v0.2 進行中
 - [x] read_url MCP tool (F001 完成)
-- [ ] Moka LRU cache
+- [x] Moka LRU cache (F002 完成)
 - [ ] crawl_knowledge MCP tool
 - [ ] lefthook hooks 啟用
 - [ ] GitHub Actions CI/CD
@@ -21,6 +21,17 @@
 ---
 
 ## Session Log
+
+### Session #11 — 2026-02-18
+**Agent**: Sonnet 4.5 (執行 Agent)
+**工作**: 實作 Moka LRU cache (F002)
+- 添加 moka 依賴（v0.12, future feature）
+- 實現 make_cache_key() 函數（query+params → 字串）
+- 在 BoseSearchServer 添加 Cache<String, SearchResponse>
+- web_search 方法添加 cache hit/miss 邏輯和 tracing 日誌
+- 添加 3 個測試（cache hit, TTL expiry, cache key）
+- 所有測試通過，clippy 零警告
+- Commit: 73b8900
 
 ### Session #10 — 2026-02-18
 **Agent**: Sonnet 4.5 (執行 Agent)

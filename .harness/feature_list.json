@@ -35,7 +35,7 @@
         "Write test verifying TTL expiry"
       ],
       "acceptance": "Second identical query returns in <1ms with cache hit log",
-      "passes": false
+      "passes": true
     },
     {
       "id": "F003",
