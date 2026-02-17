@@ -18,7 +18,7 @@
         "Register tool in BoseSearchServer"
       ],
       "acceptance": "curl a test URL via MCP returns clean text content",
-      "passes": false
+      "passes": true
     },
     {
       "id": "F002",

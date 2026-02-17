@@ -11,7 +11,7 @@
 - [x] v0.1.0 GitHub release
 
 ### v0.2 進行中
-- [ ] read_url MCP tool
+- [x] read_url MCP tool (F001 完成)
 - [ ] Moka LRU cache
 - [ ] crawl_knowledge MCP tool
 - [ ] lefthook hooks 啟用
@@ -21,6 +21,16 @@
 ---
 
 ## Session Log
+
+### Session #10 — 2026-02-18
+**Agent**: Sonnet 4.5 (執行 Agent)
+**工作**: 實作 read_url MCP tool (F001)
+- 添加 ReadUrlParams struct
+- 實現 read_url 工具（reqwest + 10s timeout）
+- 實現 strip_html_tags 函數（過濾 script/style 標籤）
+- 添加 8 個測試（5 單元測試 + 3 集成測試）
+- 所有測試通過，clippy 零警告
+- Commit: 394e222
 
 ### Session #9 — 2026-02-18
 **Agent**: Opus 4.6 (架構師)
