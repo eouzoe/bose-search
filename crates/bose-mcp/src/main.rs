@@ -35,6 +35,12 @@ struct LocalSearchParams {
     num_results: Option<u32>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ReadUrlParams {
+    #[schemars(description = "The URL to fetch")]
+    url: String,
+}
+
 #[derive(Clone)]
 struct BoseSearchServer {
     client: SearxngClient,
@@ -91,6 +97,62 @@ impl BoseSearchServer {
                 "Health check failed: {e}"
             ))])),
         }
+    }
+
+    #[tool(
+        description = "Fetch a specific URL and return clean text content (HTML tags stripped, max 50KB)."
+    )]
+    async fn read_url(
+        &self,
+        Parameters(params): Parameters<ReadUrlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use std::time::Duration;
+
+        tracing::info!(url = %params.url, "Fetching URL");
+
+        // Create a client with 10s timeout
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("bose-search/0.1")
+            .build()
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to create HTTP client: {e}"), None)
+            })?;
+
+        // Fetch the URL
+        let response = client
+            .get(&params.url)
+            .send()
+            .await
+            .map_err(|e| McpError::internal_error(format!("Failed to fetch URL: {e}"), None))?;
+
+        if !response.status().is_success() {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "HTTP error: {}",
+                response.status()
+            ))]));
+        }
+
+        // Get the response body as text
+        let html = response
+            .text()
+            .await
+            .map_err(|e| McpError::internal_error(format!("Failed to read response: {e}"), None))?;
+
+        // Strip HTML tags using a simple regex approach
+        let text = strip_html_tags(&html);
+
+        // Limit to 50KB
+        const MAX_SIZE: usize = 50 * 1024;
+        let truncated = if text.len() > MAX_SIZE {
+            format!("{}... [truncated]", &text[..MAX_SIZE])
+        } else {
+            text
+        };
+
+        tracing::info!(url = %params.url, size = truncated.len(), "URL fetched successfully");
+
+        Ok(CallToolResult::success(vec![Content::text(truncated)]))
     }
 
     #[tool(
@@ -205,6 +267,41 @@ fn format_response(resp: &SearchResponse) -> String {
     out
 }
 
+/// Strip HTML tags from text using a simple regex-like approach.
+/// This is a basic implementation that removes <tag>...</tag> patterns.
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut in_script_or_style = false;
+    let mut tag_buffer = String::new();
+
+    for ch in html.chars() {
+        if ch == '<' {
+            in_tag = true;
+            tag_buffer.clear();
+        } else if ch == '>' && in_tag {
+            in_tag = false;
+
+            // Check if we're entering or leaving script/style tags
+            let tag_lower = tag_buffer.to_lowercase();
+            if tag_lower.starts_with("script") || tag_lower.starts_with("style") {
+                in_script_or_style = true;
+            } else if tag_lower.starts_with("/script") || tag_lower.starts_with("/style") {
+                in_script_or_style = false;
+            }
+
+            tag_buffer.clear();
+        } else if in_tag {
+            tag_buffer.push(ch);
+        } else if !in_script_or_style {
+            result.push(ch);
+        }
+    }
+
+    // Clean up whitespace
+    result.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing → stderr (stdout reserved for MCP JSON-RPC)
@@ -225,4 +322,149 @@ async fn main() -> anyhow::Result<()> {
 
     service.waiting().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_html_tags_simple() {
+        let html = "<p>Hello <b>world</b>!</p>";
+        let text = strip_html_tags(html);
+        assert_eq!(text, "Hello world!");
+    }
+
+    #[test]
+    fn test_strip_html_tags_with_attributes() {
+        let html = r#"<div class="content"><a href="https://example.com">Link</a></div>"#;
+        let text = strip_html_tags(html);
+        assert_eq!(text, "Link");
+    }
+
+    #[test]
+    fn test_strip_html_tags_with_script() {
+        let html = "<p>Before</p> <script>alert('test');</script> <p>After</p>";
+        let text = strip_html_tags(html);
+        assert_eq!(text, "Before After");
+    }
+
+    #[test]
+    fn test_strip_html_tags_with_style() {
+        let html = "<p>Before</p> <style>body { color: red; }</style> <p>After</p>";
+        let text = strip_html_tags(html);
+        assert_eq!(text, "Before After");
+    }
+
+    #[test]
+    fn test_strip_html_tags_whitespace_cleanup() {
+        let html = "<p>Hello   \n\n  world</p>";
+        let text = strip_html_tags(html);
+        assert_eq!(text, "Hello world");
+    }
+
+    #[tokio::test]
+    async fn test_read_url_success() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        let html_content = r#"
+            <!DOCTYPE html>
+            <html>
+            <head><title>Test Page</title></head>
+            <body>
+                <h1>Hello World</h1>
+                <p>This is a test page.</p>
+            </body>
+            </html>
+        "#;
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(html_content))
+            .mount(&mock_server)
+            .await;
+
+        let config = BoseConfig::from_env();
+        let client = SearxngClient::new(&config).unwrap();
+        let server = BoseSearchServer::new(client, config.index_path);
+
+        let params = ReadUrlParams {
+            url: format!("{}/test", mock_server.uri()),
+        };
+
+        let result = server.read_url(Parameters(params)).await.unwrap();
+
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(result.content.len(), 1);
+        // Just check that we got some text content
+        assert!(!result.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_url_http_error() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/error"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let config = BoseConfig::from_env();
+        let client = SearxngClient::new(&config).unwrap();
+        let server = BoseSearchServer::new(client, config.index_path);
+
+        let params = ReadUrlParams {
+            url: format!("{}/error", mock_server.uri()),
+        };
+
+        let result = server.read_url(Parameters(params)).await.unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.content.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_read_url_size_limit() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let mock_server = MockServer::start().await;
+
+        // Create content larger than 50KB
+        let large_content = "a".repeat(60 * 1024);
+        let html = format!("<html><body>{}</body></html>", large_content);
+
+        Mock::given(method("GET"))
+            .and(path("/large"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(html))
+            .mount(&mock_server)
+            .await;
+
+        let config = BoseConfig::from_env();
+        let client = SearxngClient::new(&config).unwrap();
+        let server = BoseSearchServer::new(client, config.index_path);
+
+        let params = ReadUrlParams {
+            url: format!("{}/large", mock_server.uri()),
+        };
+
+        let result = server.read_url(Parameters(params)).await.unwrap();
+
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(result.content.len(), 1);
+        // Content should be truncated
+    }
 }

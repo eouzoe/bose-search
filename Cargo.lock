@@ -196,6 +196,7 @@ dependencies = [
  "bose-common",
  "bose-index",
  "bose-searxng",
+ "reqwest",
  "rmcp",
  "schemars",
  "serde",
@@ -203,6 +204,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wiremock",
 ]
 
 [[package]]
