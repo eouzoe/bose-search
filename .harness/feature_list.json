@@ -1,0 +1,138 @@
+{
+  "version": "0.2.0",
+  "generated_by": "opus-4.6",
+  "generated_at": "2026-02-18",
+  "features": [
+    {
+      "id": "F001",
+      "category": "mcp-tool",
+      "priority": "P1",
+      "description": "read_url MCP tool: fetch a specific URL and return clean text content",
+      "beads_id": "bose-search-1km",
+      "steps": [
+        "Add ReadUrlParams struct in main.rs",
+        "Implement read_url tool using reqwest GET",
+        "Strip HTML tags, return clean text (max 50KB)",
+        "Add timeout (10s) and error handling",
+        "Write integration test with wiremock",
+        "Register tool in BoseSearchServer"
+      ],
+      "acceptance": "curl a test URL via MCP returns clean text content",
+      "passes": false
+    },
+    {
+      "id": "F002",
+      "category": "performance",
+      "priority": "P1",
+      "description": "Moka LRU cache for web_search results (TTL 5min, max 1000 entries)",
+      "beads_id": "bose-search-n23",
+      "steps": [
+        "Add moka dependency to bose-mcp Cargo.toml",
+        "Create cache key from query+params hash",
+        "Wrap SearxngClient::search with cache lookup",
+        "Add cache hit/miss logging via tracing",
+        "Write unit test verifying cache hit returns same result",
+        "Write test verifying TTL expiry"
+      ],
+      "acceptance": "Second identical query returns in <1ms with cache hit log",
+      "passes": false
+    },
+    {
+      "id": "F003",
+      "category": "mcp-tool",
+      "priority": "P1",
+      "description": "crawl_knowledge MCP tool: search + fetch + index pipeline",
+      "beads_id": "bose-search-hm8",
+      "steps": [
+        "Add CrawlKnowledgeParams struct",
+        "Implement: SearXNG search -> fetch top N URLs -> extract text -> index to Tantivy",
+        "Add depth parameter (1-3) controlling how many URLs to fetch",
+        "Add source filter parameter",
+        "Return summary of indexed documents",
+        "Write integration test with wiremock"
+      ],
+      "acceptance": "crawl_knowledge('rust async') indexes 5+ documents, local_search finds them",
+      "passes": false
+    },
+    {
+      "id": "F004",
+      "category": "devops",
+      "priority": "P2",
+      "description": "Install lefthook binary and activate git hooks",
+      "beads_id": "bose-search-2xn",
+      "steps": [
+        "Install lefthook via cargo install or binary download",
+        "Run lefthook install in project root",
+        "Verify pre-commit hook runs fmt+clippy+typos",
+        "Verify commit-msg hook checks conventional commits",
+        "Document in CLAUDE.md"
+      ],
+      "acceptance": "git commit with bad format is rejected; cargo fmt violation blocks commit",
+      "passes": false
+    },
+    {
+      "id": "F005",
+      "category": "devops",
+      "priority": "P2",
+      "description": "GitHub Actions CI/CD: lint + test + build in parallel",
+      "beads_id": "bose-search-cy1",
+      "steps": [
+        "Create .github/workflows/ci.yml",
+        "Job 1: cargo fmt --check + cargo clippy -- -D warnings",
+        "Job 2: cargo test --workspace",
+        "Job 3: cargo build --release + verify binary exists",
+        "Add Cargo.lock caching",
+        "Add SearXNG service container for integration tests"
+      ],
+      "acceptance": "Push to main triggers CI; all 3 jobs pass green",
+      "passes": false
+    },
+    {
+      "id": "F006",
+      "category": "architecture",
+      "priority": "P2",
+      "description": "trait SearchBackend plugin system for pluggable data sources",
+      "beads_id": "bose-search-2or",
+      "steps": [
+        "Define trait SearchBackend in bose-common with search() method",
+        "Implement SearchBackend for SearxngClient",
+        "Implement SearchBackend for Tantivy Searcher",
+        "Refactor BoseSearchServer to use Vec<Box<dyn SearchBackend>>",
+        "Add backend selection logic in router",
+        "Write tests for each backend independently"
+      ],
+      "acceptance": "BoseSearchServer works with both backends via trait; adding new backend requires only impl SearchBackend",
+      "passes": false
+    },
+    {
+      "id": "F007",
+      "category": "documentation",
+      "priority": "P3",
+      "description": "CLAUDE.md add one-feature-at-a-time workflow specification",
+      "beads_id": "bose-search-raw",
+      "steps": [
+        "Add section referencing .harness/ workflow",
+        "Document feature_list.json usage",
+        "Document coding agent prompt location",
+        "Add dual-window workflow description"
+      ],
+      "acceptance": "New agent reading CLAUDE.md knows to check .harness/ and bd ready",
+      "passes": false
+    },
+    {
+      "id": "F008",
+      "category": "documentation",
+      "priority": "P4",
+      "description": "Convert MASTER_PLAN feature list to JSON format",
+      "beads_id": "bose-search-8qs",
+      "steps": [
+        "Extract all Phase 2-5 features from MASTER_PLAN.md",
+        "Convert to feature_list.json entries",
+        "Add acceptance criteria for each",
+        "Link to beads tasks where applicable"
+      ],
+      "acceptance": "feature_list.json contains all planned features with passes status",
+      "passes": false
+    }
+  ]
+}
