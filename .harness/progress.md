@@ -13,7 +13,7 @@
 ### v0.2 進行中
 - [x] read_url MCP tool (F001 完成)
 - [x] Moka LRU cache (F002 完成)
-- [ ] crawl_knowledge MCP tool
+- [x] crawl_knowledge MCP tool (F003 完成)
 - [ ] lefthook hooks 啟用
 - [ ] GitHub Actions CI/CD
 - [ ] trait SearchBackend plugin system
@@ -21,6 +21,18 @@
 ---
 
 ## Session Log
+
+### Session #12 — 2026-02-18
+**Agent**: Sonnet 4.5 (執行 Agent)
+**工作**: 實作 crawl_knowledge MCP tool (F003)
+- 添加 CrawlKnowledgeParams struct（query, depth, source_filter）
+- 實現完整 pipeline: SearXNG search → fetch URLs → extract text → index to Tantivy
+- Depth 參數（1-10）控制抓取 URL 數量
+- Source filter 允許按搜尋引擎過濾
+- 返回索引文檔摘要
+- 添加集成測試（2 文檔索引並可搜尋）
+- 所有測試通過，clippy 零警告
+- Commit: 8954c32
 
 ### Session #11 — 2026-02-18
 **Agent**: Sonnet 4.5 (執行 Agent)

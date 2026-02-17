@@ -52,7 +52,7 @@
         "Write integration test with wiremock"
       ],
       "acceptance": "crawl_knowledge('rust async') indexes 5+ documents, local_search finds them",
-      "passes": false
+      "passes": true
     },
     {
       "id": "F004",
