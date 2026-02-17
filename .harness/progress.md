@@ -14,13 +14,27 @@
 - [x] read_url MCP tool (F001 完成)
 - [x] Moka LRU cache (F002 完成)
 - [x] crawl_knowledge MCP tool (F003 完成)
-- [ ] lefthook hooks 啟用
+- [x] lefthook hooks 啟用 (F004 完成)
 - [ ] GitHub Actions CI/CD
 - [ ] trait SearchBackend plugin system
 
 ---
 
 ## Session Log
+
+### Session #13 — 2026-02-18
+**Agent**: Haiku 4.5 (執行 Agent)
+**工作**: 配置 lefthook git hooks (F004)
+- 安裝 lefthook v1.13.6 via Go
+- 啟用 pre-commit, pre-push, commit-msg hooks
+- 修復 clippy 警告（RangeInclusive::contains）
+- 配置 hook 文件使用完整路徑（解決 PATH 問題）
+- 驗證 hooks 正常工作：
+  - ✔️ commit-msg 拒絕錯誤格式
+  - ✔️ pre-commit 運行 fmt+clippy+typos
+- 更新 CLAUDE.md 添加 PATH 配置說明
+- Commit: 4803d2f
+- 158 tests pass, clippy clean
 
 ### Session #12 — 2026-02-18
 **Agent**: Sonnet 4.5 (執行 Agent)

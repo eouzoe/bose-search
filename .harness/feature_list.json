@@ -68,7 +68,7 @@
         "Document in CLAUDE.md"
       ],
       "acceptance": "git commit with bad format is rejected; cargo fmt violation blocks commit",
-      "passes": false
+      "passes": true
     },
     {
       "id": "F005",

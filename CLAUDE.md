@@ -165,6 +165,15 @@ go install github.com/evilmartians/lefthook@latest
 **啟用 hooks**:
 ```bash
 lefthook install
+
+# 如果使用 Go 安裝，需要配置 PATH
+# 方式 1: 修改 git hooks 使用完整路徑
+sed -i 's|lefthook -h|$HOME/go/bin/lefthook -h|g' .git/hooks/*
+sed -i 's|lefthook "$@"|$HOME/go/bin/lefthook "$@"|g' .git/hooks/*
+
+# 方式 2: 添加到系統 PATH
+echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 **Hooks 內容**:
