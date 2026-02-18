@@ -10,6 +10,7 @@ pub mod error;
 pub mod extractor;
 pub mod fusion;
 pub mod pid;
+pub mod scavenger;
 pub mod types;
 
 pub use blending::*;
@@ -20,5 +21,5 @@ pub use error::*;
 pub use extractor::*;
 pub use fusion::*;
 pub use pid::*;
+pub use scavenger::{ScavengerConfig, ScavengerResult, scavenge};
 pub use types::*;
-// Test comment

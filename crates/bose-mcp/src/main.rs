@@ -55,6 +55,24 @@ struct CrawlKnowledgeParams {
     source_filter: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ScavengerSearchParams {
+    #[schemars(description = "The search query")]
+    query: String,
+
+    #[schemars(description = "Number of raw results to analyze (default: 50, max: 100)")]
+    harvest_size: Option<u32>,
+
+    #[schemars(description = "Number of scavenger results to return (default: 10)")]
+    num_results: Option<u32>,
+
+    #[schemars(description = "Category: general, science, it, news")]
+    category: Option<String>,
+
+    #[schemars(description = "Language code: en, zh-TW, ja")]
+    language: Option<String>,
+}
+
 #[derive(Clone)]
 struct BoseSearchServer {
     client: SearxngClient,
@@ -395,6 +413,78 @@ impl BoseSearchServer {
         }
 
         Ok(CallToolResult::success(vec![Content::text(summary)]))
+    }
+
+    #[tool(
+        description = "Scavenger search: find high-quality content that mainstream engines miss. Uses information-theoretic surprise and submodular diversity selection to surface hidden gems from 247 engines."
+    )]
+    async fn scavenger_search(
+        &self,
+        Parameters(params): Parameters<ScavengerSearchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let harvest = params.harvest_size.unwrap_or(50).clamp(10, 100);
+        let top_k = params.num_results.unwrap_or(10).clamp(1, 30) as usize;
+
+        let mut query = SearchQuery::new(&params.query).with_num_results(harvest);
+        if let Some(cat) = params.category {
+            query = query.with_category(&cat);
+        }
+        query.language = params.language;
+
+        tracing::info!(query = %query.query, harvest = harvest, top_k = top_k, "Scavenger search");
+
+        let resp = match self.client.search(&query).await {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Search failed: {e}"
+                ))]));
+            }
+        };
+
+        if resp.results.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No results to scavenge.",
+            )]));
+        }
+
+        let config = ScavengerConfig {
+            top_k,
+            ..ScavengerConfig::default()
+        };
+
+        let scavenged = scavenge(&resp.results, &config);
+
+        let mut out = String::new();
+        writeln!(
+            out,
+            "Scavenged {} hidden gems from {} raw results ({} engines):\n",
+            scavenged.len(),
+            resp.results.len(),
+            resp.engines_used.len()
+        )
+        .unwrap();
+
+        for (i, sr) in scavenged.iter().enumerate() {
+            writeln!(out, "{}. [{}]({})", i + 1, sr.result.title, sr.result.url).unwrap();
+            writeln!(
+                out,
+                "   Score: {:.2} | Surprise: {:.1} bits | Engines: {}/{}",
+                sr.scavenger_score,
+                sr.surprise,
+                sr.engine_frequency,
+                resp.engines_used.len()
+            )
+            .unwrap();
+            writeln!(out, "   Why: {}", sr.explanation).unwrap();
+            if let Some(ref s) = sr.result.snippet {
+                let truncated = if s.len() > 200 { &s[..200] } else { s };
+                writeln!(out, "   {truncated}").unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(out)]))
     }
 }
 
