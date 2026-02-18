@@ -1,5 +1,9 @@
 # Bose Search
 
+[![CI](https://github.com/eouzoe/bose-search/actions/workflows/ci.yml/badge.svg)](https://github.com/eouzoe/bose-search/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
+[![Rust](https://img.shields.io/badge/rust-1.82%2B-orange.svg)](https://www.rust-lang.org/)
+
 Zero-cost, high-performance search for AI agents via [Model Context Protocol](https://modelcontextprotocol.io/).
 
 Bose aggregates 247 search engines through [SearXNG](https://docs.searxng.org/) and maintains a local knowledge index powered by [Tantivy](https://github.com/quickwit-oss/tantivy) — exposed as MCP tools that any compatible client can use straightaway.
@@ -65,6 +69,7 @@ Bose implements several ranking and processing algorithms:
 - **Document Chunking** (`bose-common/chunker.rs`) — Splits large documents into indexable segments with configurable overlap for context preservation.
 - **HTML Extraction** (`bose-common/extractor.rs`) — Strips markup to extract clean text content for indexing.
 - **Query Expansion Router** (`bose-search/router.rs`) — Routes queries to the optimal combination of backends based on query characteristics.
+- **Scavenger Algorithm** (`bose-common/scavenger.rs`) — Information-theoretic surprise scoring S(r) = −log₂(freq(r)/|E|) surfaces results that mainstream engines systematically miss. Greedy submodular selection with (1−1/e) approximation guarantee (Nemhauser et al. 1978) ensures diversity-aware top-k retrieval.
 
 ## SearXNG Deployment
 
@@ -110,7 +115,7 @@ Bose aims to change that. Beyond conventional search, we're building a "scavengi
 - [x] Local Tantivy knowledge index with full-text search
 - [x] Content crawler with PID-controlled backpressure
 - [ ] Streaming hybrid results — local results first, web results as they arrive
-- [ ] "Scavenging" algorithm — surface overlooked and forgotten content
+- [x] Scavenging algorithm — core implementation complete (MCP integration pending)
 - [ ] SIMD-accelerated BM25 scoring engine (Block-Max WAND)
 - [ ] io_uring async I/O via monoio
 - [ ] Plugin system for custom search backends
