@@ -1,8 +1,9 @@
 use crate::response::SearxngResponse;
 use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
+use std::fmt::Write as _;
 use std::time::Instant;
 
-/// SearXNG HTTP client.
+/// `SearXNG` HTTP client.
 #[derive(Clone)]
 pub struct SearxngClient {
     http: reqwest::Client,
@@ -10,6 +11,11 @@ pub struct SearxngClient {
 }
 
 impl SearxngClient {
+    /// Create a new client from a [`BoseConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying HTTP client cannot be built.
     pub fn new(config: &BoseConfig) -> BoseResult<Self> {
         let http = reqwest::Client::builder()
             .tcp_keepalive(std::time::Duration::from_secs(60))
@@ -18,20 +24,28 @@ impl SearxngClient {
             .build()
             .map_err(BoseError::HttpError)?;
 
-        Ok(Self {
-            http,
-            base_url: config.searxng_url.clone(),
-        })
+        Ok(Self { http, base_url: config.searxng_url.clone() })
     }
 
+    /// Create a client from a raw URL string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying HTTP client cannot be built.
     pub fn from_url(url: &str) -> BoseResult<Self> {
-        let config = BoseConfig {
-            searxng_url: url.to_string(),
-            ..BoseConfig::default()
-        };
+        let config = BoseConfig { searxng_url: url.to_string(), ..BoseConfig::default() };
         Self::new(&config)
     }
 
+    /// Execute a search query against `SearXNG`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or the response cannot be parsed.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "elapsed_ms fits in u64 for any practical request duration"
+    )]
     pub async fn search(&self, query: &SearchQuery) -> BoseResult<SearchResponse> {
         let start = Instant::now();
 
@@ -43,13 +57,16 @@ impl SearxngClient {
         );
 
         if let Some(ref cat) = query.category {
-            url.push_str(&format!("&categories={}", urlencoding::encode(cat)));
+            write!(url, "&categories={}", urlencoding::encode(cat))
+                .unwrap_or_else(|_| unreachable!("write! to String is infallible"));
         }
         if let Some(ref lang) = query.language {
-            url.push_str(&format!("&language={}", urlencoding::encode(lang)));
+            write!(url, "&language={}", urlencoding::encode(lang))
+                .unwrap_or_else(|_| unreachable!("write! to String is infallible"));
         }
         if let Some(ref tr) = query.time_range {
-            url.push_str(&format!("&time_range={}", urlencoding::encode(tr)));
+            write!(url, "&time_range={}", urlencoding::encode(tr))
+                .unwrap_or_else(|_| unreachable!("write! to String is infallible"));
         }
 
         tracing::info!(query = %query.query, "SearXNG search");
@@ -73,21 +90,26 @@ impl SearxngClient {
         let result_count = searxng_resp.results.len();
         let response = searxng_resp.into_search_response(elapsed);
 
+        #[expect(clippy::cast_sign_loss, reason = "elapsed is always positive after abs()")]
+        let elapsed_ms = (elapsed * 1000.0).abs() as u64;
+
         tracing::info!(
             query = %query.query,
             results = result_count,
-            elapsed_ms = %(elapsed * 1000.0) as u64,
+            elapsed_ms = %elapsed_ms,
             "Search complete"
         );
 
         Ok(response)
     }
 
+    /// Check if the `SearXNG` instance is reachable and responding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or the response cannot be parsed.
     pub async fn health_check(&self) -> BoseResult<bool> {
-        let url = format!(
-            "{}/search?q=test&format=json&number_of_results=1",
-            self.base_url
-        );
+        let url = format!("{}/search?q=test&format=json&number_of_results=1", self.base_url);
         match self.http.get(&url).send().await {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
@@ -97,6 +119,8 @@ impl SearxngClient {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};

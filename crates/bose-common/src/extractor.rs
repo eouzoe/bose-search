@@ -17,6 +17,7 @@
 /// assert!(text.contains("Hello"));
 /// assert!(text.contains("world"));
 /// ```
+#[must_use]
 pub fn extract_text(html: &str) -> String {
     let mut result = String::with_capacity(html.len() / 2);
     let mut in_tag = false;

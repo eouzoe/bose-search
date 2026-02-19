@@ -36,6 +36,10 @@ impl Searcher {
     ///
     /// - `index_path`: path to the index directory
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the index cannot be opened or the reader cannot be created.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -62,6 +66,10 @@ impl Searcher {
     /// - `query`: search query string
     /// - `limit`: maximum number of results to return
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the query cannot be parsed or the search fails.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -80,9 +88,7 @@ impl Searcher {
         let query_parser = QueryParser::for_index(&self.index, vec![title_field, body_field]);
 
         // 解析查詢
-        let query = query_parser
-            .parse_query(query)
-            .context("Failed to parse query")?;
+        let query = query_parser.parse_query(query).context("Failed to parse query")?;
 
         // 執行搜尋
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
@@ -155,6 +161,7 @@ impl Searcher {
     }
 
     /// 獲取索引中的文檔總數
+    #[must_use]
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
     }
@@ -162,6 +169,8 @@ impl Searcher {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
     use crate::indexer::{Document, Indexer};
     use chrono::Utc;

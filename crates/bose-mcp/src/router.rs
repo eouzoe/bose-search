@@ -33,10 +33,7 @@ pub struct QueryExpansionRouter {
 
 impl Default for QueryExpansionRouter {
     fn default() -> Self {
-        Self {
-            skip_threshold: 0.85,
-            gap_threshold: 0.15,
-        }
+        Self { skip_threshold: 0.85, gap_threshold: 0.15 }
     }
 }
 
@@ -46,6 +43,7 @@ impl QueryExpansionRouter {
     /// Reads:
     /// - `QUERY_EXPANSION_SKIP_THRESHOLD` (default: 0.85)
     /// - `QUERY_EXPANSION_GAP_THRESHOLD` (default: 0.15)
+    #[must_use]
     pub fn from_env() -> Self {
         let skip_threshold = std::env::var("QUERY_EXPANSION_SKIP_THRESHOLD")
             .ok()
@@ -57,10 +55,7 @@ impl QueryExpansionRouter {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.15);
 
-        Self {
-            skip_threshold,
-            gap_threshold,
-        }
+        Self { skip_threshold, gap_threshold }
     }
 
     /// Decide whether to skip query expansion.
@@ -120,14 +115,11 @@ impl QueryExpansionRouter {
         let skip = top_score >= self.skip_threshold && gap >= self.gap_threshold;
 
         let reason = if skip {
-            format!(
-                "High confidence: top_score={:.2}, gap={:.2}",
-                top_score, gap
-            )
+            format!("High confidence: top_score={top_score:.2}, gap={gap:.2}")
         } else {
             format!(
-                "Low confidence: top_score={:.2} (threshold={:.2}), gap={:.2} (threshold={:.2})",
-                top_score, self.skip_threshold, gap, self.gap_threshold
+                "Low confidence: top_score={top_score:.2} (threshold={:.2}), gap={gap:.2} (threshold={:.2})",
+                self.skip_threshold, self.gap_threshold
             )
         };
 
@@ -137,12 +129,7 @@ impl QueryExpansionRouter {
             debug!("Executing query expansion: {}", reason);
         }
 
-        SkipDecision {
-            skip,
-            reason,
-            top_score: Some(top_score),
-            gap: Some(gap),
-        }
+        SkipDecision { skip, reason, top_score: Some(top_score), gap: Some(gap) }
     }
 }
 
@@ -166,6 +153,9 @@ pub struct SkipDecision {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::float_cmp, reason = "test: comparing exact literal values")]
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
 
     // Mock search result for testing
@@ -222,10 +212,7 @@ mod tests {
     #[test]
     fn test_skip_high_confidence() {
         let router = QueryExpansionRouter::default();
-        let results = vec![
-            MockSearchResult { score: 0.92 },
-            MockSearchResult { score: 0.65 },
-        ];
+        let results = vec![MockSearchResult { score: 0.92 }, MockSearchResult { score: 0.65 }];
 
         let decision = router.should_skip_expansion(&results);
         assert!(decision.skip, "Should skip expansion for high confidence");
@@ -238,10 +225,7 @@ mod tests {
     #[test]
     fn test_expand_low_confidence() {
         let router = QueryExpansionRouter::default();
-        let results = vec![
-            MockSearchResult { score: 0.78 },
-            MockSearchResult { score: 0.72 },
-        ];
+        let results = vec![MockSearchResult { score: 0.78 }, MockSearchResult { score: 0.72 }];
 
         let decision = router.should_skip_expansion(&results);
         assert!(!decision.skip, "Should expand for low confidence");
@@ -255,10 +239,7 @@ mod tests {
     #[test]
     fn test_boundary_skip() {
         let router = QueryExpansionRouter::default();
-        let results = vec![
-            MockSearchResult { score: 0.85 },
-            MockSearchResult { score: 0.68 },
-        ];
+        let results = vec![MockSearchResult { score: 0.85 }, MockSearchResult { score: 0.68 }];
 
         let decision = router.should_skip_expansion(&results);
         assert!(decision.skip, "Should skip when score equals threshold");

@@ -1,0 +1,53 @@
+# Bose Search - Git Hooks Configuration
+# Powered by lefthook: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.rs"
+      run: cargo fmt --check
+      stage_fixed: true
+
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    typos:
+      run: typos
+
+    toml-check:
+      glob: "*.toml"
+      run: taplo fmt --check
+
+pre-push:
+  parallel: false
+  commands:
+    test:
+      run: cargo test --all-features
+
+    audit:
+      run: cargo audit
+
+    deny:
+      run: cargo deny check
+
+    gitleaks:
+      run: gitleaks detect --no-git --verbose
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        # Check if commit message follows conventional commits format
+        # Format: <type>(<scope>): <subject>
+        # Types: feat, fix, docs, style, refactor, perf, test, chore
+        msg=$(cat {1})
+        if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+\))?: .+'; then
+          echo "❌ Commit message must follow conventional commits format:"
+          echo "   <type>(<scope>): <subject>"
+          echo ""
+          echo "   Types: feat, fix, docs, style, refactor, perf, test, chore"
+          echo "   Example: feat(mcp): add web_search tool"
+          exit 1
+        fi

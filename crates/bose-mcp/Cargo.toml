@@ -24,3 +24,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+reqwest = { workspace = true }
+moka = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tempfile = "3"

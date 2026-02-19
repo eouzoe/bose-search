@@ -36,6 +36,11 @@ impl Indexer {
     /// - `index_path`: path to the index directory
     /// - `heap_size_mb`: writer heap size in MB
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the index directory cannot be created or opened,
+    /// or if the index writer cannot be initialized.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -57,9 +62,7 @@ impl Indexer {
 
         // 創建寫入器
         let heap_size = heap_size_mb * 1024 * 1024;
-        let writer = index
-            .writer(heap_size)
-            .context("Failed to create index writer")?;
+        let writer = index.writer(heap_size).context("Failed to create index writer")?;
 
         Ok(Self { index, writer })
     }
@@ -69,6 +72,10 @@ impl Indexer {
     /// # Arguments
     ///
     /// - `doc`: document to index
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the schema field lookup or document write fails.
     ///
     /// # Examples
     ///
@@ -122,6 +129,10 @@ impl Indexer {
     }
 
     /// 批量添加文檔
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any document fails to be added.
     pub fn add_documents(&mut self, docs: &[Document]) -> Result<()> {
         for doc in docs {
             self.add_document(doc)?;
@@ -130,12 +141,17 @@ impl Indexer {
     }
 
     /// 提交所有待處理的文檔
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the commit operation fails.
     pub fn commit(&mut self) -> Result<()> {
         self.writer.commit()?;
         Ok(())
     }
 
     /// 獲取索引引用
+    #[must_use]
     pub fn index(&self) -> &Index {
         &self.index
     }
@@ -143,6 +159,8 @@ impl Indexer {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
     use tempfile::TempDir;
 

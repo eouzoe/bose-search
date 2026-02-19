@@ -2,6 +2,10 @@
 //!
 //! Local knowledge index built on Tantivy.
 
+#![warn(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 pub mod indexer;
 pub mod schema;
 pub mod searcher;

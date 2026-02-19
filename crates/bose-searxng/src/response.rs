@@ -1,7 +1,7 @@
 use bose_common::{SearchResponse, SearchResult};
 use serde::Deserialize;
 
-/// Top-level SearXNG JSON response.
+/// Top-level `SearXNG` JSON response.
 #[derive(Debug, Deserialize)]
 pub struct SearxngResponse {
     pub query: String,
@@ -14,7 +14,7 @@ pub struct SearxngResponse {
     pub unresponsive_engines: Vec<(String, String)>,
 }
 
-/// A single search result from SearXNG.
+/// A single search result from `SearXNG`.
 #[derive(Debug, Deserialize)]
 pub struct SearxngResult {
     pub url: String,
@@ -60,6 +60,9 @@ impl SearxngResponse {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+    #![expect(clippy::float_cmp, reason = "test: comparing exact literal value")]
+
     use super::*;
 
     fn sample_searxng_json() -> serde_json::Value {
