@@ -28,6 +28,7 @@
 /// let score = blend_scores(0.5, 0.9, 15);
 /// assert!((score - 0.8).abs() < 0.01); // 0.25 * 0.5 + 0.75 * 0.9
 /// ```
+#[must_use]
 pub fn blend_scores(rrf_score: f64, reranker_score: f64, rank: usize) -> f64 {
     let (rrf_weight, reranker_weight) = get_weights(rank);
     rrf_weight * rrf_score + reranker_weight * reranker_score
@@ -55,6 +56,7 @@ fn get_weights(rank: usize) -> (f64, f64) {
 /// # Returns
 ///
 /// 返回混合後的結果列表
+#[must_use]
 pub fn blend_results(results: Vec<BlendInput>) -> Vec<BlendOutput> {
     results
         .into_iter()
@@ -137,21 +139,9 @@ mod tests {
     #[test]
     fn test_blend_results() {
         let inputs = vec![
-            BlendInput {
-                id: "doc1".to_string(),
-                rrf_score: 0.9,
-                reranker_score: 0.7,
-            },
-            BlendInput {
-                id: "doc2".to_string(),
-                rrf_score: 0.8,
-                reranker_score: 0.85,
-            },
-            BlendInput {
-                id: "doc3".to_string(),
-                rrf_score: 0.6,
-                reranker_score: 0.95,
-            },
+            BlendInput { id: "doc1".to_string(), rrf_score: 0.9, reranker_score: 0.7 },
+            BlendInput { id: "doc2".to_string(), rrf_score: 0.8, reranker_score: 0.85 },
+            BlendInput { id: "doc3".to_string(), rrf_score: 0.6, reranker_score: 0.95 },
         ];
 
         let outputs = blend_results(inputs);

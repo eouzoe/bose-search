@@ -45,20 +45,21 @@ impl Chunker {
     /// # Panics
     ///
     /// Panics if `overlap_ratio` is not in the range [0.0, 1.0)
+    #[must_use]
     pub fn new(chunk_size: usize, overlap_ratio: f64) -> Self {
-        assert!(
-            (0.0..1.0).contains(&overlap_ratio),
-            "overlap_ratio must be in [0.0, 1.0)"
-        );
+        assert!((0.0..1.0).contains(&overlap_ratio), "overlap_ratio must be in [0.0, 1.0)");
         assert!(chunk_size > 0, "chunk_size must be > 0");
 
-        Self {
-            chunk_size,
-            overlap_ratio,
-        }
+        Self { chunk_size, overlap_ratio }
     }
 
     /// Calculate the number of overlapping tokens
+    #[expect(clippy::cast_precision_loss, reason = "chunk_size fits in f64 for practical values")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "result is a token count, truncation is intentional"
+    )]
+    #[expect(clippy::cast_sign_loss, reason = "product of positive values is non-negative")]
     fn overlap_size(&self) -> usize {
         (self.chunk_size as f64 * self.overlap_ratio) as usize
     }
@@ -72,6 +73,10 @@ impl Chunker {
     /// # Returns
     ///
     /// A vector of text chunks, each a substring of the original.
+    #[must_use]
+    #[expect(clippy::cast_precision_loss, reason = "chunk_size fits in f64 for practical values")]
+    #[expect(clippy::cast_possible_truncation, reason = "word counts are truncated intentionally")]
+    #[expect(clippy::cast_sign_loss, reason = "division of positive values is non-negative")]
     pub fn chunk(&self, text: &str) -> Vec<String> {
         if text.is_empty() {
             return vec![];
@@ -126,6 +131,11 @@ impl Default for Chunker {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+    #![expect(clippy::cast_precision_loss, reason = "test: small values fit in f64")]
+    #![expect(clippy::cast_possible_truncation, reason = "test: truncation is intentional")]
+    #![expect(clippy::cast_sign_loss, reason = "test: value is positive")]
+
     use super::*;
 
     #[test]
@@ -145,13 +155,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "overlap_ratio must be in [0.0, 1.0)")]
     fn test_invalid_overlap_ratio() {
-        Chunker::new(800, 1.5);
+        let _ = Chunker::new(800, 1.5);
     }
 
     #[test]
     #[should_panic(expected = "chunk_size must be > 0")]
     fn test_invalid_chunk_size() {
-        Chunker::new(0, 0.15);
+        let _ = Chunker::new(0, 0.15);
     }
 
     #[test]
@@ -182,7 +192,7 @@ mod tests {
     #[test]
     fn test_chunk_long_text() {
         let chunker = Chunker::new(100, 0.15); // 小塊用於測試
-        let words: Vec<String> = (0..200).map(|i| format!("word{}", i)).collect();
+        let words: Vec<String> = (0..200).map(|i| format!("word{i}")).collect();
         let text = words.join(" ");
 
         let chunks = chunker.chunk(&text);
@@ -199,7 +209,7 @@ mod tests {
     #[test]
     fn test_chunk_overlap() {
         let chunker = Chunker::new(100, 0.2); // 20% 重疊
-        let words: Vec<String> = (0..200).map(|i| format!("word{}", i)).collect();
+        let words: Vec<String> = (0..200).map(|i| format!("word{i}")).collect();
         let text = words.join(" ");
 
         let chunks = chunker.chunk(&text);
@@ -218,7 +228,7 @@ mod tests {
     #[test]
     fn test_chunk_preserves_content() {
         let chunker = Chunker::new(100, 0.15);
-        let words: Vec<String> = (0..150).map(|i| format!("word{}", i)).collect();
+        let words: Vec<String> = (0..150).map(|i| format!("word{i}")).collect();
         let text = words.join(" ");
 
         let chunks = chunker.chunk(&text);
@@ -251,7 +261,7 @@ mod tests {
     fn test_chunk_exact_size() {
         let chunker = Chunker::new(100, 0.0); // 無重疊
         let words_per_chunk = (100.0 / 1.3) as usize;
-        let words: Vec<String> = (0..words_per_chunk).map(|i| format!("w{}", i)).collect();
+        let words: Vec<String> = (0..words_per_chunk).map(|i| format!("w{i}")).collect();
         let text = words.join(" ");
 
         let chunks = chunker.chunk(&text);
@@ -261,7 +271,7 @@ mod tests {
     #[test]
     fn test_chunk_no_overlap() {
         let chunker = Chunker::new(100, 0.0);
-        let words: Vec<String> = (0..200).map(|i| format!("word{}", i)).collect();
+        let words: Vec<String> = (0..200).map(|i| format!("word{i}")).collect();
         let text = words.join(" ");
 
         let chunks = chunker.chunk(&text);

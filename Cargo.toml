@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/bose-common",
-    "crates/bose-searxng",
-    "crates/bose-mcp",
-    "crates/bose-index",
-    "crates/bose-crawler",
+  "crates/bose-common",
+  "crates/bose-searxng",
+  "crates/bose-mcp",
+  "crates/bose-index",
+  "crates/bose-crawler",
 ]
 
 [workspace.package]
@@ -21,7 +21,11 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "gzip",
+  "rustls-tls",
+] }
 url = "2"
 urlencoding = "2"
 chrono = { version = "0.4", features = ["serde"] }

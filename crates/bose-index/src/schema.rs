@@ -2,7 +2,7 @@
 //!
 //! 定義本地知識庫的索引結構。
 
-use tantivy::schema::*;
+use tantivy::schema::{FAST, INDEXED, STORED, STRING, Schema, TEXT};
 
 /// Create the Tantivy schema.
 ///
@@ -25,6 +25,7 @@ use tantivy::schema::*;
 /// let schema = create_schema();
 /// assert_eq!(schema.fields().count(), 8);
 /// ```
+#[must_use]
 pub fn create_schema() -> Schema {
     let mut builder = Schema::builder();
 
@@ -59,6 +60,8 @@ pub mod fields {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
 
     #[test]

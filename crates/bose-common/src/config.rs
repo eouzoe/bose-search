@@ -24,6 +24,7 @@ impl Default for BoseConfig {
 }
 
 impl BoseConfig {
+    #[must_use]
     pub fn from_env() -> Self {
         let default = Self::default();
         Self {

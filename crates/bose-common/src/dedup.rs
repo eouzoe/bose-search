@@ -34,10 +34,9 @@ pub struct Deduplicator {
 
 impl Deduplicator {
     /// 建立新的去重器
+    #[must_use]
     pub fn new() -> Self {
-        Self {
-            seen: HashSet::new(),
-        }
+        Self { seen: HashSet::new() }
     }
 
     /// Add content and return its SHA-256 hash.
@@ -66,22 +65,26 @@ impl Deduplicator {
     /// # Returns
     ///
     /// Returns `true` if the content already exists, `false` otherwise.
+    #[must_use]
     pub fn contains(&self, content: &str) -> bool {
         let hash = compute_sha256(content);
         self.seen.contains(&hash)
     }
 
     /// 檢查 hash 是否已存在
+    #[must_use]
     pub fn contains_hash(&self, hash: &str) -> bool {
         self.seen.contains(hash)
     }
 
     /// 返回已去重的內容數量
+    #[must_use]
     pub fn len(&self) -> usize {
         self.seen.len()
     }
 
     /// 檢查是否為空
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.seen.is_empty()
     }
@@ -110,11 +113,12 @@ impl Deduplicator {
 /// let hash = compute_sha256("Hello, world!");
 /// assert_eq!(hash.len(), 64); // SHA-256 = 32 bytes = 64 hex chars
 /// ```
+#[must_use]
 pub fn compute_sha256(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    format!("{result:x}")
 }
 
 /// 批量去重
@@ -136,6 +140,7 @@ pub fn compute_sha256(content: &str) -> String {
 /// let deduped = deduplicate(contents);
 /// assert_eq!(deduped, vec!["a", "b", "c"]);
 /// ```
+#[must_use]
 pub fn deduplicate<T: AsRef<str>>(contents: Vec<T>) -> Vec<String> {
     let mut dedup = Deduplicator::new();
     let mut result = Vec::new();

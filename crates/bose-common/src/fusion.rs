@@ -56,21 +56,15 @@ impl Default for RRFFusion {
 
 impl RRFFusion {
     /// Create a new RRF fusion instance.
+    #[must_use]
     pub fn new() -> Self {
-        Self {
-            k: 60.0,
-            scores: HashMap::new(),
-            best_ranks: HashMap::new(),
-        }
+        Self { k: 60.0, scores: HashMap::new(), best_ranks: HashMap::new() }
     }
 
     /// Create a fusion instance with a custom k value.
+    #[must_use]
     pub fn with_k(k: f64) -> Self {
-        Self {
-            k,
-            scores: HashMap::new(),
-            best_ranks: HashMap::new(),
-        }
+        Self { k, scores: HashMap::new(), best_ranks: HashMap::new() }
     }
 
     /// Add results from one engine.
@@ -82,6 +76,10 @@ impl RRFFusion {
     /// * `weight` — engine weight (use 2.0 for the original query)
     pub fn add_results(&mut self, _source: &str, results: Vec<RankedResult>, weight: f64) {
         for result in results {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "rank is small, precision loss negligible"
+            )]
             let rrf_score = weight / (self.k + result.rank as f64 + 1.0);
 
             // Accumulate score
@@ -104,6 +102,7 @@ impl RRFFusion {
     /// # Returns
     ///
     /// Results sorted by descending RRF score.
+    #[must_use]
     pub fn fuse(&self, top_n: usize) -> Vec<FusedResult> {
         let mut results: Vec<FusedResult> = self
             .scores
@@ -118,20 +117,12 @@ impl RRFFusion {
                     _ => 0.0,
                 };
 
-                FusedResult {
-                    id: id.clone(),
-                    score: score + bonus,
-                    best_rank,
-                }
+                FusedResult { id: id.clone(), score: score + bonus, best_rank }
             })
             .collect();
 
         // Sort by score descending
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         results.into_iter().take(top_n).collect()
     }
@@ -167,18 +158,9 @@ mod tests {
         fusion.add_results(
             "engine_a",
             vec![
-                RankedResult {
-                    id: "doc1".to_string(),
-                    rank: 0,
-                },
-                RankedResult {
-                    id: "doc2".to_string(),
-                    rank: 1,
-                },
-                RankedResult {
-                    id: "doc3".to_string(),
-                    rank: 2,
-                },
+                RankedResult { id: "doc1".to_string(), rank: 0 },
+                RankedResult { id: "doc2".to_string(), rank: 1 },
+                RankedResult { id: "doc3".to_string(), rank: 2 },
             ],
             1.0,
         );
@@ -198,14 +180,8 @@ mod tests {
         fusion.add_results(
             "engine_a",
             vec![
-                RankedResult {
-                    id: "doc1".to_string(),
-                    rank: 0,
-                },
-                RankedResult {
-                    id: "doc2".to_string(),
-                    rank: 1,
-                },
+                RankedResult { id: "doc1".to_string(), rank: 0 },
+                RankedResult { id: "doc2".to_string(), rank: 1 },
             ],
             1.0,
         );
@@ -213,14 +189,8 @@ mod tests {
         fusion.add_results(
             "engine_b",
             vec![
-                RankedResult {
-                    id: "doc2".to_string(),
-                    rank: 0,
-                },
-                RankedResult {
-                    id: "doc3".to_string(),
-                    rank: 1,
-                },
+                RankedResult { id: "doc2".to_string(), rank: 0 },
+                RankedResult { id: "doc3".to_string(), rank: 1 },
             ],
             1.0,
         );
@@ -235,24 +205,10 @@ mod tests {
         let mut fusion = RRFFusion::new();
 
         // Original query weight ×2
-        fusion.add_results(
-            "original",
-            vec![RankedResult {
-                id: "doc1".to_string(),
-                rank: 0,
-            }],
-            2.0,
-        );
+        fusion.add_results("original", vec![RankedResult { id: "doc1".to_string(), rank: 0 }], 2.0);
 
         // Expanded query weight ×1
-        fusion.add_results(
-            "expanded",
-            vec![RankedResult {
-                id: "doc2".to_string(),
-                rank: 0,
-            }],
-            1.0,
-        );
+        fusion.add_results("expanded", vec![RankedResult { id: "doc2".to_string(), rank: 0 }], 1.0);
 
         let fused = fusion.fuse(10);
         // doc1 should rank first (higher weight)
@@ -267,18 +223,9 @@ mod tests {
         fusion.add_results(
             "engine",
             vec![
-                RankedResult {
-                    id: "doc1".to_string(),
-                    rank: 0,
-                }, // Gets +0.05 bonus
-                RankedResult {
-                    id: "doc2".to_string(),
-                    rank: 1,
-                }, // Gets +0.03 bonus
-                RankedResult {
-                    id: "doc3".to_string(),
-                    rank: 2,
-                }, // No bonus
+                RankedResult { id: "doc1".to_string(), rank: 0 }, // Gets +0.05 bonus
+                RankedResult { id: "doc2".to_string(), rank: 1 }, // Gets +0.03 bonus
+                RankedResult { id: "doc3".to_string(), rank: 2 }, // No bonus
             ],
             1.0,
         );
@@ -306,18 +253,9 @@ mod tests {
         fusion.add_results(
             "engine",
             vec![
-                RankedResult {
-                    id: "doc1".to_string(),
-                    rank: 0,
-                },
-                RankedResult {
-                    id: "doc2".to_string(),
-                    rank: 1,
-                },
-                RankedResult {
-                    id: "doc3".to_string(),
-                    rank: 2,
-                },
+                RankedResult { id: "doc1".to_string(), rank: 0 },
+                RankedResult { id: "doc2".to_string(), rank: 1 },
+                RankedResult { id: "doc3".to_string(), rank: 2 },
             ],
             1.0,
         );
@@ -332,14 +270,7 @@ mod tests {
     fn test_custom_k() {
         let mut fusion = RRFFusion::with_k(30.0);
 
-        fusion.add_results(
-            "engine",
-            vec![RankedResult {
-                id: "doc1".to_string(),
-                rank: 0,
-            }],
-            1.0,
-        );
+        fusion.add_results("engine", vec![RankedResult { id: "doc1".to_string(), rank: 0 }], 1.0);
 
         let fused = fusion.fuse(1);
         // With k=30: score = 1/(30+0+1) + 0.05 bonus

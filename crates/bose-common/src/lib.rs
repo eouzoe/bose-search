@@ -2,6 +2,10 @@
 //!
 //! Common data structures, error types, and configuration shared across all crates.
 
+#![warn(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 pub mod blending;
 pub mod chunker;
 pub mod config;

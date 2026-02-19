@@ -32,11 +32,13 @@ impl SearchQuery {
         }
     }
 
+    #[must_use]
     pub fn with_num_results(mut self, n: u32) -> Self {
         self.num_results = n;
         self
     }
 
+    #[must_use]
     pub fn with_category(mut self, cat: impl Into<String>) -> Self {
         self.category = Some(cat.into());
         self
@@ -55,6 +57,8 @@ pub struct SearchResponse {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
 
     #[test]
@@ -69,9 +73,7 @@ mod tests {
 
     #[test]
     fn test_search_query_builder() {
-        let q = SearchQuery::new("rust")
-            .with_num_results(20)
-            .with_category("it");
+        let q = SearchQuery::new("rust").with_num_results(20).with_category("it");
         assert_eq!(q.num_results, 20);
         assert_eq!(q.category.as_deref(), Some("it"));
     }

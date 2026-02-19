@@ -6,7 +6,7 @@
 //!
 //! Mathematical foundations:
 //! - Information-theoretic surprise: S(r) = -log₂(freq(r) / |E|)
-//! - Temporal decay resistance: D(r) = quality(r) × ln(1 + age_years)
+//! - Temporal decay resistance: D(r) = quality(r) × ln(1 + `age_years`)
 //! - Submodular selection with (1-1/e) approximation guarantee (Nemhauser 1978)
 
 use crate::SearchResult;
@@ -51,7 +51,7 @@ pub struct ScavengerResult {
     pub scavenger_score: f64,
     /// How many engines returned this result (lower = more unique).
     pub engine_frequency: usize,
-    /// Information-theoretic surprise: -log₂(freq / total_engines).
+    /// Information-theoretic surprise: `-log₂(freq / total_engines)`.
     pub surprise: f64,
     /// Human-readable explanation of why this result was surfaced.
     pub explanation: String,
@@ -64,7 +64,7 @@ struct CoverageAnalysis {
     url_engines: HashMap<String, HashSet<String>>,
     /// Total number of distinct engines observed.
     total_engines: usize,
-    /// Engine frequency distribution (engine_name -> result_count).
+    /// Engine frequency distribution (`engine_name` -> `result_count`).
     engine_counts: HashMap<String, usize>,
 }
 
@@ -78,26 +78,23 @@ fn analyze_coverage(results: &[SearchResult]) -> CoverageAnalysis {
     let mut engine_counts: HashMap<String, usize> = HashMap::new();
 
     for r in results {
-        url_engines
-            .entry(r.url.clone())
-            .or_default()
-            .insert(r.engine.clone());
+        url_engines.entry(r.url.clone()).or_default().insert(r.engine.clone());
         all_engines.insert(r.engine.clone());
         *engine_counts.entry(r.engine.clone()).or_default() += 1;
     }
 
-    CoverageAnalysis {
-        url_engines,
-        total_engines: all_engines.len(),
-        engine_counts,
-    }
+    CoverageAnalysis { url_engines, total_engines: all_engines.len(), engine_counts }
 }
 
 /// Compute information-theoretic surprise for a result.
 ///
-/// S(r) = -log₂(freq(r) / total_engines)
+/// S(r) = -log₂(freq(r) / `total_engines`)
 /// A result found by 1 of 12 engines has surprise ≈ 3.58 bits.
 /// A result found by all engines has surprise = 0 bits.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "engine counts are small, precision loss negligible"
+)]
 fn compute_surprise(engine_freq: usize, total_engines: usize) -> f64 {
     if total_engines == 0 || engine_freq == 0 {
         return 0.0;
@@ -110,8 +107,9 @@ fn compute_surprise(engine_freq: usize, total_engines: usize) -> f64 {
 ///
 /// Normalized to [0, 1] range using a sigmoid-like function.
 /// Longer snippets suggest deeper, more detailed content.
-fn compute_depth(snippet: &Option<String>, median_len: f64) -> f64 {
-    let len = snippet.as_ref().map_or(0, |s| s.len()) as f64;
+#[expect(clippy::cast_precision_loss, reason = "snippet length fits in f64 for practical values")]
+fn compute_depth(snippet: Option<&str>, median_len: f64) -> f64 {
+    let len = snippet.map_or(0, str::len) as f64;
     if median_len <= 0.0 {
         return 0.0;
     }
@@ -123,6 +121,7 @@ fn compute_depth(snippet: &Option<String>, median_len: f64) -> f64 {
 /// Compute pairwise URL distance for diversity selection.
 ///
 /// Uses Jaccard distance on URL path components as a simple proxy.
+#[expect(clippy::cast_precision_loss, reason = "intersection/union counts are small")]
 fn url_distance(a: &str, b: &str) -> f64 {
     let parts_a: HashSet<&str> = a.split('/').filter(|s| !s.is_empty()).collect();
     let parts_b: HashSet<&str> = b.split('/').filter(|s| !s.is_empty()).collect();
@@ -152,6 +151,11 @@ fn url_distance(a: &str, b: &str) -> f64 {
 /// 3. Scavenger scoring (surprise × quality × disagreement)
 /// 4. Greedy submodular selection (diversity-aware top-k)
 /// 5. Explanation generation
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "snippet lengths and counts are small, precision loss negligible"
+)]
 pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<ScavengerResult> {
     if results.is_empty() {
         return Vec::new();
@@ -161,10 +165,8 @@ pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<Scave
     let coverage = analyze_coverage(results);
 
     // Compute median snippet length for depth normalization
-    let snippet_lengths: Vec<f64> = results
-        .iter()
-        .filter_map(|r| r.snippet.as_ref().map(|s| s.len() as f64))
-        .collect();
+    let snippet_lengths: Vec<f64> =
+        results.iter().filter_map(|r| r.snippet.as_deref().map(|s| s.len() as f64)).collect();
     let median_len = if snippet_lengths.is_empty() {
         100.0
     } else {
@@ -185,18 +187,18 @@ pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<Scave
         seen_urls.insert(r.url.clone());
 
         // Skip results with very short snippets (likely spam)
-        if r.snippet.as_ref().map_or(0, |s| s.len()) < config.min_snippet_len {
+        if r.snippet.as_deref().map_or(0, str::len) < config.min_snippet_len {
             continue;
         }
 
         let engines = coverage.url_engines.get(&r.url);
-        let engine_freq = engines.map_or(1, |e| e.len());
+        let engine_freq = engines.map_or(1, HashSet::len);
 
         // Information-theoretic surprise
         let surprise = compute_surprise(engine_freq, coverage.total_engines);
 
         // Content depth
-        let depth = compute_depth(&r.snippet, median_len);
+        let depth = compute_depth(r.snippet.as_deref(), median_len);
 
         // Engine rarity bonus: results from less common engines get a boost
         let engine_rarity = coverage.engine_counts.get(&r.engine).map_or(1.0, |&count| {
@@ -204,7 +206,10 @@ pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<Scave
             if total == 0 {
                 1.0
             } else {
-                1.0 - (count as f64 / total as f64)
+                #[expect(clippy::cast_precision_loss, reason = "engine counts are small")]
+                {
+                    1.0 - (count as f64 / total as f64)
+                }
             }
         });
 
@@ -214,13 +219,8 @@ pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<Scave
             + config.disagreement_weight * engine_rarity;
 
         // Generate explanation
-        let explanation = generate_explanation(
-            engine_freq,
-            coverage.total_engines,
-            surprise,
-            depth,
-            &r.engine,
-        );
+        let explanation =
+            generate_explanation(engine_freq, coverage.total_engines, surprise, depth, &r.engine);
 
         scored.push(ScavengerResult {
             result: r.clone(),
@@ -238,15 +238,15 @@ pub fn scavenge(results: &[SearchResult], config: &ScavengerConfig) -> Vec<Scave
 /// True greedy submodular selection with marginal gain recomputation.
 ///
 /// At each step, selects the candidate that maximizes:
-///   marginal_gain(r, S) = scavenger_score(r) + λ · min_distance(r, S)
+///   `marginal_gain(r, S)` = `scavenger_score(r)` + λ · `min_distance(r, S)`
 ///
 /// This is the correct submodular greedy algorithm where marginal gains
 /// are recomputed at each step relative to the current selection set.
 /// Approximation guarantee: (1 - 1/e) ≈ 63% of optimal for monotone
 /// submodular functions under cardinality constraint (Nemhauser et al. 1978).
 ///
-/// Note: Our objective f(S) = Σ scavenger_score(r) + λ · Σ min_dist(r, S\{r})
-/// is monotone submodular when min_dist satisfies diminishing returns,
+/// Note: Our objective f(S) = Σ `scavenger_score(r)` + λ · Σ `min_dist(r, S\{r})`
+/// is monotone submodular when `min_dist` satisfies diminishing returns,
 /// which holds for our Jaccard-based URL distance.
 fn greedy_select(candidates: &[ScavengerResult], config: &ScavengerConfig) -> Vec<ScavengerResult> {
     let n = candidates.len();
@@ -314,13 +314,9 @@ fn generate_explanation(
     let mut parts = Vec::new();
 
     if engine_freq == 1 {
-        parts.push(format!(
-            "Found by only {source_engine} (1 of {total_engines} engines)"
-        ));
+        parts.push(format!("Found by only {source_engine} (1 of {total_engines} engines)"));
     } else if engine_freq <= total_engines / 3 {
-        parts.push(format!(
-            "Found by {engine_freq} of {total_engines} engines (minority)"
-        ));
+        parts.push(format!("Found by {engine_freq} of {total_engines} engines (minority)"));
     }
 
     if surprise > 2.0 {
@@ -331,11 +327,7 @@ fn generate_explanation(
         parts.push("Deep content".to_string());
     }
 
-    if parts.is_empty() {
-        "Standard result".to_string()
-    } else {
-        parts.join(" | ")
-    }
+    if parts.is_empty() { "Standard result".to_string() } else { parts.join(" | ") }
 }
 
 #[cfg(test)]
@@ -346,7 +338,7 @@ mod tests {
         SearchResult {
             title: title.to_string(),
             url: url.to_string(),
-            snippet: snippet.map(|s| s.to_string()),
+            snippet: snippet.map(ToString::to_string),
             engine: engine.to_string(),
             score: Some(1.0),
             category: "general".to_string(),
@@ -373,8 +365,8 @@ mod tests {
         let long = Some("a".repeat(500));
         let median = 100.0;
 
-        let d_short = compute_depth(&short, median);
-        let d_long = compute_depth(&long, median);
+        let d_short = compute_depth(short.as_deref(), median);
+        let d_long = compute_depth(long.as_deref(), median);
 
         assert!(d_long > d_short, "Longer content should score higher");
         assert!(d_long > 0.5, "Long content should score > 0.5");
@@ -399,43 +391,19 @@ mod tests {
     fn test_scavenge_unique_results_score_higher() {
         let results = vec![
             // Found by google (common engine)
-            make_result(
-                "Common",
-                "https://common.com",
-                "google",
-                Some(&"a".repeat(100)),
-            ),
-            make_result(
-                "Common2",
-                "https://common2.com",
-                "google",
-                Some(&"b".repeat(100)),
-            ),
-            make_result(
-                "Common3",
-                "https://common3.com",
-                "google",
-                Some(&"c".repeat(100)),
-            ),
+            make_result("Common", "https://common.com", "google", Some(&"a".repeat(100))),
+            make_result("Common2", "https://common2.com", "google", Some(&"b".repeat(100))),
+            make_result("Common3", "https://common3.com", "google", Some(&"c".repeat(100))),
             // Found by a rare engine
-            make_result(
-                "Rare Gem",
-                "https://rare.com",
-                "startpage",
-                Some(&"d".repeat(200)),
-            ),
+            make_result("Rare Gem", "https://rare.com", "startpage", Some(&"d".repeat(200))),
         ];
 
         let scavenged = scavenge(&results, &ScavengerConfig::default());
         assert!(!scavenged.is_empty());
 
         // The rare result should have a higher scavenger score
-        let rare = scavenged
-            .iter()
-            .find(|r| r.result.url == "https://rare.com");
-        let common = scavenged
-            .iter()
-            .find(|r| r.result.url == "https://common.com");
+        let rare = scavenged.iter().find(|r| r.result.url == "https://rare.com");
+        let common = scavenged.iter().find(|r| r.result.url == "https://common.com");
 
         if let (Some(rare), Some(common)) = (rare, common) {
             assert!(
@@ -450,26 +418,12 @@ mod tests {
     #[test]
     fn test_scavenge_diversity() {
         let results = vec![
-            make_result(
-                "A",
-                "https://example.com/a",
-                "google",
-                Some(&"x".repeat(100)),
-            ),
-            make_result(
-                "B",
-                "https://example.com/b",
-                "google",
-                Some(&"y".repeat(100)),
-            ),
+            make_result("A", "https://example.com/a", "google", Some(&"x".repeat(100))),
+            make_result("B", "https://example.com/b", "google", Some(&"y".repeat(100))),
             make_result("C", "https://other.org/c", "brave", Some(&"z".repeat(100))),
         ];
 
-        let config = ScavengerConfig {
-            top_k: 2,
-            diversity_threshold: 0.5,
-            ..Default::default()
-        };
+        let config = ScavengerConfig { top_k: 2, diversity_threshold: 0.5, ..Default::default() };
 
         let scavenged = scavenge(&results, &config);
         assert!(scavenged.len() <= 2);
@@ -478,10 +432,7 @@ mod tests {
         let urls: Vec<&str> = scavenged.iter().map(|r| r.result.url.as_str()).collect();
         // At least one should be from other.org if diversity is working
         let has_other = urls.iter().any(|u| u.contains("other.org"));
-        assert!(
-            has_other,
-            "Diversity selection should include different domains"
-        );
+        assert!(has_other, "Diversity selection should include different domains");
     }
 
     #[test]

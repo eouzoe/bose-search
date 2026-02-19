@@ -41,6 +41,10 @@ pub struct Fetcher {
 
 impl Fetcher {
     /// 創建新的抓取器
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
     pub fn new(max_concurrency: usize, timeout_secs: u64) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
@@ -58,13 +62,17 @@ impl Fetcher {
     }
 
     /// Create a fetcher with PID-controlled backpressure (safety-first config).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
     pub fn with_backpressure(max_concurrency: usize, timeout_secs: u64) -> Result<Self> {
         let mut fetcher = Self::new(max_concurrency, timeout_secs)?;
 
         // 安全優先: 目標延遲 100ms, CPU 40%, 並發 2-20
         let pid = PidController::new()
             .with_targets(100.0, 40.0)
-            .with_limits(2, max_concurrency.min(20) as u32);
+            .with_limits(2, max_concurrency.min(20).try_into().unwrap_or(20));
 
         let monitor = SystemMonitor::with_safety_threshold(70.0);
 
@@ -75,6 +83,10 @@ impl Fetcher {
     }
 
     /// Fetch a single URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or the response body cannot be read.
     pub async fn fetch_one(&self, url: &str) -> Result<FetchResult, FetchError> {
         let start = Instant::now();
 
@@ -85,37 +97,28 @@ impl Fetcher {
                     Ok(body) => {
                         let latency = start.elapsed();
                         self.metrics.record_success(latency, body.len());
-                        Ok(FetchResult {
-                            url: url.to_string(),
-                            status,
-                            body,
-                            latency,
-                        })
+                        Ok(FetchResult { url: url.to_string(), status, body, latency })
                     }
                     Err(e) => {
                         let latency = start.elapsed();
                         self.metrics.record_failure(latency);
-                        Err(FetchError {
-                            url: url.to_string(),
-                            error: e.to_string(),
-                            latency,
-                        })
+                        Err(FetchError { url: url.to_string(), error: e.to_string(), latency })
                     }
                 }
             }
             Err(e) => {
                 let latency = start.elapsed();
                 self.metrics.record_failure(latency);
-                Err(FetchError {
-                    url: url.to_string(),
-                    error: e.to_string(),
-                    latency,
-                })
+                Err(FetchError { url: url.to_string(), error: e.to_string(), latency })
             }
         }
     }
 
     /// Fetch URLs in batch with concurrency control.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the semaphore is closed, which should never happen in normal operation.
     pub async fn crawl_batch(&self, urls: Vec<String>) -> Vec<Result<FetchResult, FetchError>> {
         let semaphore = Arc::new(Semaphore::new(self.max_concurrency));
         let mut handles = Vec::with_capacity(urls.len());
@@ -127,6 +130,10 @@ impl Fetcher {
             let timeout = self.timeout;
 
             handles.push(tokio::spawn(async move {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "semaphore is never closed in normal operation"
+                )]
                 let _permit = sem.acquire().await.unwrap();
                 let start = Instant::now();
 
@@ -137,32 +144,19 @@ impl Fetcher {
                             Ok(body) => {
                                 let latency = start.elapsed();
                                 metrics.record_success(latency, body.len());
-                                Ok(FetchResult {
-                                    url,
-                                    status,
-                                    body,
-                                    latency,
-                                })
+                                Ok(FetchResult { url, status, body, latency })
                             }
                             Err(e) => {
                                 let latency = start.elapsed();
                                 metrics.record_failure(latency);
-                                Err(FetchError {
-                                    url,
-                                    error: e.to_string(),
-                                    latency,
-                                })
+                                Err(FetchError { url, error: e.to_string(), latency })
                             }
                         }
                     }
                     Err(e) => {
                         let latency = start.elapsed();
                         metrics.record_failure(latency);
-                        Err(FetchError {
-                            url,
-                            error: e.to_string(),
-                            latency,
-                        })
+                        Err(FetchError { url, error: e.to_string(), latency })
                     }
                 }
             }));
@@ -191,6 +185,14 @@ impl Fetcher {
     /// - Pauses crawling when CPU > 70%, waits 5s to cool down
     /// - Hard caps concurrency at 20 regardless of PID output
     /// - Total crawl timeout: 5 minutes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the crawl operation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if monitor or PID controller is None when they should be initialized.
     pub async fn crawl_with_backpressure(
         &mut self,
         urls: Vec<String>,
@@ -223,8 +225,16 @@ impl Fetcher {
             }
 
             // 安全檢查: CPU > 70% 時暫停
+            #[expect(
+                clippy::unwrap_used,
+                reason = "monitor is guaranteed to be Some when entering this function"
+            )]
             let is_safe = self.monitor.as_mut().unwrap().is_safe();
             if !is_safe {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "monitor is guaranteed to be Some when entering this function"
+                )]
                 let snapshot = self.monitor.as_mut().unwrap().snapshot();
                 tracing::warn!(
                     "CPU too high ({:.1}%), pausing for 5 seconds",
@@ -236,8 +246,16 @@ impl Fetcher {
 
             // 每秒調整一次並發量
             if last_adjustment.elapsed() >= adjustment_interval {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "monitor is guaranteed to be Some when entering this function"
+                )]
                 let snapshot = self.monitor.as_mut().unwrap().snapshot();
                 let system_metrics = self.metrics.to_system_metrics(snapshot.cpu_percent);
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "pid is guaranteed to be Some when entering this function"
+                )]
                 let new_limit = self.pid.as_mut().unwrap().adjust(&system_metrics);
 
                 tracing::debug!(
@@ -251,6 +269,10 @@ impl Fetcher {
             }
 
             // 取當前並發限制的 URL 數量
+            #[expect(
+                clippy::unwrap_used,
+                reason = "pid is guaranteed to be Some when entering this function"
+            )]
             let current_limit = self.pid.as_ref().unwrap().current_limit() as usize;
             let batch_size = current_limit.min(remaining_urls.len());
             let batch: Vec<_> = remaining_urls.drain(..batch_size).collect();
@@ -267,6 +289,7 @@ impl Fetcher {
     }
 
     /// 獲取指標引用
+    #[must_use]
     pub fn metrics(&self) -> &CrawlerMetrics {
         &self.metrics
     }
@@ -274,6 +297,8 @@ impl Fetcher {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
     use crate::monitor::MockMonitor;
 
@@ -319,16 +344,11 @@ mod tests {
         fetcher.monitor = Some(Box::new(MockMonitor::unsafe_cpu()));
 
         let urls = vec!["http://localhost:1/test".to_string()];
-        let result = tokio::time::timeout(
-            Duration::from_secs(2),
-            fetcher.crawl_with_backpressure(urls),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(2), fetcher.crawl_with_backpressure(urls))
+                .await;
 
-        assert!(
-            result.is_err(),
-            "Should timeout because crawler pauses on high CPU"
-        );
+        assert!(result.is_err(), "Should timeout because crawler pauses on high CPU");
     }
 
     // Requirement: CPU < 70% allows crawling to proceed
@@ -347,11 +367,7 @@ mod tests {
     fn test_pid_concurrency_within_bounds() {
         let fetcher = Fetcher::with_backpressure(20, 10).unwrap();
         let limit = fetcher.pid.as_ref().unwrap().current_limit();
-        assert!(
-            (2..=20).contains(&limit),
-            "PID limit {} out of [2, 20]",
-            limit
-        );
+        assert!((2..=20).contains(&limit), "PID limit {limit} out of [2, 20]");
     }
 
     // Requirement: without PID, falls back to normal batch

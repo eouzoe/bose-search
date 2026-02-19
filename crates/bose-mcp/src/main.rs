@@ -1,10 +1,19 @@
-use bose_common::*;
+#![warn(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+
+use bose_common::{BoseConfig, ScavengerConfig, SearchQuery, SearchResponse, scavenge};
 use bose_index::searcher::Searcher;
 use bose_searxng::SearxngClient;
 use moka::future::Cache;
 use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters, model::*, schemars, tool, tool_handler, tool_router,
+    ErrorData as McpError, ServerHandler, ServiceExt,
+    handler::server::tool::ToolRouter,
+    handler::server::wrapper::Parameters,
+    model::{
+        CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+        ToolsCapability,
+    },
+    schemars, tool, tool_handler, tool_router,
     transport::stdio,
 };
 use std::fmt::Write;
@@ -85,17 +94,10 @@ struct BoseSearchServer {
 impl BoseSearchServer {
     fn new(client: SearxngClient, index_path: String) -> Self {
         // Create cache with 5min TTL and max 1000 entries
-        let cache = Cache::builder()
-            .max_capacity(1000)
-            .time_to_live(Duration::from_secs(5 * 60))
-            .build();
+        let cache =
+            Cache::builder().max_capacity(1000).time_to_live(Duration::from_secs(5 * 60)).build();
 
-        Self {
-            client,
-            index_path,
-            tool_router: Self::tool_router(),
-            cache,
-        }
+        Self { client, index_path, tool_router: Self::tool_router(), cache }
     }
 
     #[tool(
@@ -120,9 +122,7 @@ impl BoseSearchServer {
         // Check cache first
         if let Some(cached_resp) = self.cache.get(&cache_key).await {
             tracing::info!(query = %query.query, "Cache hit");
-            return Ok(CallToolResult::success(vec![Content::text(
-                format_response(&cached_resp),
-            )]));
+            return Ok(CallToolResult::success(vec![Content::text(format_response(&cached_resp))]));
         }
 
         tracing::info!(query = %query.query, "Cache miss");
@@ -133,28 +133,22 @@ impl BoseSearchServer {
                 // Store in cache
                 self.cache.insert(cache_key, resp.clone()).await;
 
-                Ok(CallToolResult::success(vec![Content::text(
-                    format_response(&resp),
-                )]))
+                Ok(CallToolResult::success(vec![Content::text(format_response(&resp))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Search failed: {e}"
-            ))])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!("Search failed: {e}"))])),
         }
     }
 
     #[tool(description = "Check if the SearXNG search backend is healthy and responding.")]
     async fn health_check(&self) -> Result<CallToolResult, McpError> {
         match self.client.health_check().await {
-            Ok(true) => Ok(CallToolResult::success(vec![Content::text(
-                "SearXNG is healthy",
-            )])),
-            Ok(false) => Ok(CallToolResult::error(vec![Content::text(
-                "SearXNG is not responding",
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Health check failed: {e}"
-            ))])),
+            Ok(true) => Ok(CallToolResult::success(vec![Content::text("SearXNG is healthy")])),
+            Ok(false) => {
+                Ok(CallToolResult::error(vec![Content::text("SearXNG is not responding")]))
+            }
+            Err(e) => {
+                Ok(CallToolResult::error(vec![Content::text(format!("Health check failed: {e}"))]))
+            }
         }
     }
 
@@ -166,6 +160,8 @@ impl BoseSearchServer {
         Parameters(params): Parameters<ReadUrlParams>,
     ) -> Result<CallToolResult, McpError> {
         use std::time::Duration;
+
+        const MAX_SIZE: usize = 50 * 1024;
 
         tracing::info!(url = %params.url, "Fetching URL");
 
@@ -202,7 +198,6 @@ impl BoseSearchServer {
         let text = strip_html_tags(&html);
 
         // Limit to 50KB
-        const MAX_SIZE: usize = 50 * 1024;
         let truncated = if text.len() > MAX_SIZE {
             format!("{}... [truncated]", &text[..MAX_SIZE])
         } else {
@@ -221,13 +216,10 @@ impl BoseSearchServer {
         &self,
         Parameters(params): Parameters<LocalSearchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let searcher = match Searcher::new(&self.index_path) {
-            Ok(s) => s,
-            Err(_) => {
-                return Ok(CallToolResult::success(vec![Content::text(
-                    "Local index not found. Set BOSE_INDEX_PATH or crawl content first.",
-                )]));
-            }
+        let Ok(searcher) = Searcher::new(&self.index_path) else {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "Local index not found. Set BOSE_INDEX_PATH or crawl content first.",
+            )]));
         };
 
         let limit = params.num_results.unwrap_or(10) as usize;
@@ -241,34 +233,33 @@ impl BoseSearchServer {
             }
             Ok(results) => {
                 let mut out = String::new();
-                writeln!(
-                    out,
-                    "Found {} local results for \"{}\":\n",
-                    results.len(),
-                    params.query
-                )
-                .unwrap();
-                for (i, r) in results.iter().enumerate() {
-                    writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
+                #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
+                {
                     writeln!(
                         out,
-                        "   Score: {:.2} | Source: {} | Lang: {}",
-                        r.search_score, r.source, r.language
+                        "Found {} local results for \"{}\":\n",
+                        results.len(),
+                        params.query
                     )
                     .unwrap();
-                    let snippet = if r.body.len() > 200 {
-                        &r.body[..200]
-                    } else {
-                        &r.body
-                    };
-                    writeln!(out, "   {snippet}").unwrap();
-                    writeln!(out).unwrap();
+                    for (i, r) in results.iter().enumerate() {
+                        writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
+                        writeln!(
+                            out,
+                            "   Score: {:.2} | Source: {} | Lang: {}",
+                            r.search_score, r.source, r.language
+                        )
+                        .unwrap();
+                        let snippet = if r.body.len() > 200 { &r.body[..200] } else { &r.body };
+                        writeln!(out, "   {snippet}").unwrap();
+                        writeln!(out).unwrap();
+                    }
                 }
                 Ok(CallToolResult::success(vec![Content::text(out)]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Local search failed: {e}"
-            ))])),
+            Err(e) => {
+                Ok(CallToolResult::error(vec![Content::text(format!("Local search failed: {e}"))]))
+            }
         }
     }
 
@@ -401,15 +392,14 @@ impl BoseSearchServer {
             params.query
         );
 
-        for (i, doc) in documents.iter().enumerate() {
-            writeln!(summary, "{}. {} ({})", i + 1, doc.title, doc.url).unwrap();
-            let snippet = if doc.body.len() > 150 {
-                &doc.body[..150]
-            } else {
-                &doc.body
-            };
-            writeln!(summary, "   {snippet}...").unwrap();
-            writeln!(summary).unwrap();
+        #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
+        {
+            for (i, doc) in documents.iter().enumerate() {
+                writeln!(summary, "{}. {} ({})", i + 1, doc.title, doc.url).unwrap();
+                let snippet = if doc.body.len() > 150 { &doc.body[..150] } else { &doc.body };
+                writeln!(summary, "   {snippet}...").unwrap();
+                writeln!(summary).unwrap();
+            }
         }
 
         Ok(CallToolResult::success(vec![Content::text(summary)]))
@@ -443,45 +433,43 @@ impl BoseSearchServer {
         };
 
         if resp.results.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(
-                "No results to scavenge.",
-            )]));
+            return Ok(CallToolResult::success(vec![Content::text("No results to scavenge.")]));
         }
 
-        let config = ScavengerConfig {
-            top_k,
-            ..ScavengerConfig::default()
-        };
+        let config = ScavengerConfig { top_k, ..ScavengerConfig::default() };
 
         let scavenged = scavenge(&resp.results, &config);
 
         let mut out = String::new();
-        writeln!(
-            out,
-            "Scavenged {} hidden gems from {} raw results ({} engines):\n",
-            scavenged.len(),
-            resp.results.len(),
-            resp.engines_used.len()
-        )
-        .unwrap();
-
-        for (i, sr) in scavenged.iter().enumerate() {
-            writeln!(out, "{}. [{}]({})", i + 1, sr.result.title, sr.result.url).unwrap();
+        #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
+        {
             writeln!(
                 out,
-                "   Score: {:.2} | Surprise: {:.1} bits | Engines: {}/{}",
-                sr.scavenger_score,
-                sr.surprise,
-                sr.engine_frequency,
+                "Scavenged {} hidden gems from {} raw results ({} engines):\n",
+                scavenged.len(),
+                resp.results.len(),
                 resp.engines_used.len()
             )
             .unwrap();
-            writeln!(out, "   Why: {}", sr.explanation).unwrap();
-            if let Some(ref s) = sr.result.snippet {
-                let truncated = if s.len() > 200 { &s[..200] } else { s };
-                writeln!(out, "   {truncated}").unwrap();
+
+            for (i, sr) in scavenged.iter().enumerate() {
+                writeln!(out, "{}. [{}]({})", i + 1, sr.result.title, sr.result.url).unwrap();
+                writeln!(
+                    out,
+                    "   Score: {:.2} | Surprise: {:.1} bits | Engines: {}/{}",
+                    sr.scavenger_score,
+                    sr.surprise,
+                    sr.engine_frequency,
+                    resp.engines_used.len()
+                )
+                .unwrap();
+                writeln!(out, "   Why: {}", sr.explanation).unwrap();
+                if let Some(ref s) = sr.result.snippet {
+                    let truncated = if s.len() > 200 { &s[..200] } else { s };
+                    writeln!(out, "   {truncated}").unwrap();
+                }
+                writeln!(out).unwrap();
             }
-            writeln!(out).unwrap();
         }
 
         Ok(CallToolResult::success(vec![Content::text(out)]))
@@ -516,27 +504,30 @@ impl ServerHandler for BoseSearchServer {
 
 fn format_response(resp: &SearchResponse) -> String {
     let mut out = String::new();
-    writeln!(
-        out,
-        "Found {} results for \"{}\" ({:.1}s):\n",
-        resp.results.len(),
-        resp.query,
-        resp.elapsed_seconds
-    )
-    .unwrap();
+    #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
+    {
+        writeln!(
+            out,
+            "Found {} results for \"{}\" ({:.1}s):\n",
+            resp.results.len(),
+            resp.query,
+            resp.elapsed_seconds
+        )
+        .unwrap();
 
-    for (i, r) in resp.results.iter().enumerate() {
-        writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
-        writeln!(out, "   Source: {} | Category: {}", r.engine, r.category).unwrap();
-        if let Some(ref s) = r.snippet {
-            let truncated = if s.len() > 200 { &s[..200] } else { s };
-            writeln!(out, "   {truncated}").unwrap();
+        for (i, r) in resp.results.iter().enumerate() {
+            writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
+            writeln!(out, "   Source: {} | Category: {}", r.engine, r.category).unwrap();
+            if let Some(ref s) = r.snippet {
+                let truncated = if s.len() > 200 { &s[..200] } else { s };
+                writeln!(out, "   {truncated}").unwrap();
+            }
+            writeln!(out).unwrap();
         }
-        writeln!(out).unwrap();
-    }
 
-    if !resp.engines_used.is_empty() {
-        writeln!(out, "Engines: {}", resp.engines_used.join(", ")).unwrap();
+        if !resp.engines_used.is_empty() {
+            writeln!(out, "Engines: {}", resp.engines_used.join(", ")).unwrap();
+        }
     }
     out
 }
@@ -579,16 +570,17 @@ fn strip_html_tags(html: &str) -> String {
 /// Generate a cache key from search query and parameters.
 /// Uses a simple string concatenation approach for deterministic keys.
 fn make_cache_key(query: &SearchQuery) -> String {
+    use std::fmt::Write;
     let mut key = format!("q:{}", query.query);
-    key.push_str(&format!("|n:{}", query.num_results));
+    let _ = write!(key, "|n:{}", query.num_results);
     if let Some(ref cat) = query.category {
-        key.push_str(&format!("|c:{}", cat));
+        let _ = write!(key, "|c:{cat}");
     }
     if let Some(ref lang) = query.language {
-        key.push_str(&format!("|l:{}", lang));
+        let _ = write!(key, "|l:{lang}");
     }
     if let Some(ref tr) = query.time_range {
-        key.push_str(&format!("|t:{}", tr));
+        let _ = write!(key, "|t:{tr}");
     }
     key
 }
@@ -596,10 +588,7 @@ fn make_cache_key(query: &SearchQuery) -> String {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing → stderr (stdout reserved for MCP JSON-RPC)
-    tracing_subscriber::fmt()
-        .with_env_filter("bose=info")
-        .with_writer(std::io::stderr)
-        .init();
+    tracing_subscriber::fmt().with_env_filter("bose=info").with_writer(std::io::stderr).init();
 
     let config = BoseConfig::from_env();
     let client = SearxngClient::new(&config)?;
@@ -617,6 +606,8 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
 
     #[test]
@@ -663,7 +654,7 @@ mod tests {
 
         let mock_server = MockServer::start().await;
 
-        let html_content = r#"
+        let html_content = r"
             <!DOCTYPE html>
             <html>
             <head><title>Test Page</title></head>
@@ -672,7 +663,7 @@ mod tests {
                 <p>This is a test page.</p>
             </body>
             </html>
-        "#;
+        ";
 
         Mock::given(method("GET"))
             .and(path("/test"))
@@ -684,9 +675,7 @@ mod tests {
         let client = SearxngClient::new(&config).unwrap();
         let server = BoseSearchServer::new(client, config.index_path);
 
-        let params = ReadUrlParams {
-            url: format!("{}/test", mock_server.uri()),
-        };
+        let params = ReadUrlParams { url: format!("{}/test", mock_server.uri()) };
 
         let result = server.read_url(Parameters(params)).await.unwrap();
 
@@ -715,9 +704,7 @@ mod tests {
         let client = SearxngClient::new(&config).unwrap();
         let server = BoseSearchServer::new(client, config.index_path);
 
-        let params = ReadUrlParams {
-            url: format!("{}/error", mock_server.uri()),
-        };
+        let params = ReadUrlParams { url: format!("{}/error", mock_server.uri()) };
 
         let result = server.read_url(Parameters(params)).await.unwrap();
 
@@ -736,7 +723,7 @@ mod tests {
 
         // Create content larger than 50KB
         let large_content = "a".repeat(60 * 1024);
-        let html = format!("<html><body>{}</body></html>", large_content);
+        let html = format!("<html><body>{large_content}</body></html>");
 
         Mock::given(method("GET"))
             .and(path("/large"))
@@ -748,9 +735,7 @@ mod tests {
         let client = SearxngClient::new(&config).unwrap();
         let server = BoseSearchServer::new(client, config.index_path);
 
-        let params = ReadUrlParams {
-            url: format!("{}/large", mock_server.uri()),
-        };
+        let params = ReadUrlParams { url: format!("{}/large", mock_server.uri()) };
 
         let result = server.read_url(Parameters(params)).await.unwrap();
 
@@ -789,10 +774,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config = BoseConfig {
-            searxng_url: mock_server.uri(),
-            ..BoseConfig::default()
-        };
+        let config = BoseConfig { searxng_url: mock_server.uri(), ..BoseConfig::default() };
         let client = SearxngClient::new(&config).unwrap();
         let server = BoseSearchServer::new(client, config.index_path);
 
@@ -845,17 +827,12 @@ mod tests {
             .await;
 
         // Create server with very short TTL for testing
-        let config = BoseConfig {
-            searxng_url: mock_server.uri(),
-            ..BoseConfig::default()
-        };
+        let config = BoseConfig { searxng_url: mock_server.uri(), ..BoseConfig::default() };
         let client = SearxngClient::new(&config).unwrap();
 
         // Create cache with 1 second TTL for testing
-        let cache = Cache::builder()
-            .max_capacity(1000)
-            .time_to_live(Duration::from_secs(1))
-            .build();
+        let cache =
+            Cache::builder().max_capacity(1000).time_to_live(Duration::from_secs(1)).build();
 
         let server = BoseSearchServer {
             client,
@@ -945,7 +922,7 @@ mod tests {
             .await;
 
         // Mock document pages
-        let doc1_html = r#"
+        let doc1_html = r"
             <html>
             <head><title>Rust Async Programming</title></head>
             <body>
@@ -955,9 +932,9 @@ mod tests {
                 The Rust async ecosystem includes tokio, async-std, and many other libraries.</p>
             </body>
             </html>
-        "#;
+        ";
 
-        let doc2_html = r#"
+        let doc2_html = r"
             <html>
             <head><title>Async/Await in Rust</title></head>
             <body>
@@ -967,7 +944,7 @@ mod tests {
                 This is a powerful feature for building high-performance applications.</p>
             </body>
             </html>
-        "#;
+        ";
 
         Mock::given(method("GET"))
             .and(path("/doc1"))
@@ -1000,23 +977,14 @@ mod tests {
             source_filter: None,
         };
 
-        let result = server
-            .crawl_knowledge(Parameters(crawl_params))
-            .await
-            .unwrap();
+        let result = server.crawl_knowledge(Parameters(crawl_params)).await.unwrap();
 
         assert_eq!(result.is_error, Some(false));
 
         // Verify documents were indexed by searching
-        let search_params = LocalSearchParams {
-            query: "async".to_string(),
-            num_results: Some(10),
-        };
+        let search_params = LocalSearchParams { query: "async".to_string(), num_results: Some(10) };
 
-        let search_result = server
-            .local_search(Parameters(search_params))
-            .await
-            .unwrap();
+        let search_result = server.local_search(Parameters(search_params)).await.unwrap();
 
         assert_eq!(search_result.is_error, Some(false));
         // Should find at least one document

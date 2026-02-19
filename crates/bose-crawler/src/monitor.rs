@@ -20,19 +20,15 @@ pub struct SystemMonitor {
 
 impl SystemMonitor {
     /// Create a new system monitor with default CPU safety threshold of 70%.
+    #[must_use]
     pub fn new() -> Self {
-        Self {
-            sys: System::new_all(),
-            safety_threshold_cpu: 70.0,
-        }
+        Self { sys: System::new_all(), safety_threshold_cpu: 70.0 }
     }
 
     /// Create a system monitor with a custom CPU safety threshold.
+    #[must_use]
     pub fn with_safety_threshold(cpu_percent: f64) -> Self {
-        Self {
-            sys: System::new_all(),
-            safety_threshold_cpu: cpu_percent,
-        }
+        Self { sys: System::new_all(), safety_threshold_cpu: cpu_percent }
     }
 }
 
@@ -40,7 +36,7 @@ impl CpuMonitor for SystemMonitor {
     /// Check whether the system is safe (CPU below threshold).
     fn is_safe(&mut self) -> bool {
         self.sys.refresh_cpu_usage();
-        let cpu_percent = self.sys.global_cpu_usage() as f64;
+        let cpu_percent = f64::from(self.sys.global_cpu_usage());
         cpu_percent < self.safety_threshold_cpu
     }
 
@@ -50,15 +46,11 @@ impl CpuMonitor for SystemMonitor {
     fn snapshot(&mut self) -> SystemSnapshot {
         self.sys.refresh_cpu_usage();
 
-        let cpu_percent = self.sys.global_cpu_usage() as f64;
+        let cpu_percent = f64::from(self.sys.global_cpu_usage());
         let memory_used_mb = self.sys.used_memory() / 1024 / 1024;
         let memory_total_mb = self.sys.total_memory() / 1024 / 1024;
 
-        SystemSnapshot {
-            cpu_percent,
-            memory_used_mb,
-            memory_total_mb,
-        }
+        SystemSnapshot { cpu_percent, memory_used_mb, memory_total_mb }
     }
 }
 
@@ -89,6 +81,7 @@ pub struct MockMonitor {
 
 #[cfg(test)]
 impl MockMonitor {
+    #[must_use]
     pub fn safe() -> Self {
         Self {
             cpu_percent: 20.0,
@@ -98,6 +91,7 @@ impl MockMonitor {
         }
     }
 
+    #[must_use]
     pub fn unsafe_cpu() -> Self {
         Self {
             cpu_percent: 85.0,
@@ -107,6 +101,7 @@ impl MockMonitor {
         }
     }
 
+    #[must_use]
     pub fn with_cpu(cpu_percent: f64, threshold: f64) -> Self {
         Self {
             cpu_percent,
@@ -136,6 +131,7 @@ impl CpuMonitor for MockMonitor {
 mod tests {
     use super::*;
 
+    #[expect(clippy::float_cmp, reason = "test: comparing exact literal")]
     #[test]
     fn test_monitor_new() {
         let monitor = SystemMonitor::new();
@@ -160,19 +156,13 @@ mod tests {
     #[test]
     fn test_mock_unsafe_cpu_is_not_safe() {
         let mut mock = MockMonitor::unsafe_cpu();
-        assert!(
-            !mock.is_safe(),
-            "CPU 85% should NOT be safe (threshold 70%)"
-        );
+        assert!(!mock.is_safe(), "CPU 85% should NOT be safe (threshold 70%)");
     }
 
     #[test]
     fn test_mock_custom_threshold() {
         let mut mock = MockMonitor::with_cpu(60.0, 50.0);
-        assert!(
-            !mock.is_safe(),
-            "CPU 60% should NOT be safe (threshold 50%)"
-        );
+        assert!(!mock.is_safe(), "CPU 60% should NOT be safe (threshold 50%)");
 
         let mut mock2 = MockMonitor::with_cpu(40.0, 50.0);
         assert!(mock2.is_safe(), "CPU 40% should be safe (threshold 50%)");

@@ -8,7 +8,7 @@
 //! - Target latency: 100ms
 //! - Target CPU: 60%
 //! - Concurrency range: [5, 200]
-//! - Multi-signal fusion: max(latency_error, cpu_error * 2)
+//! - Multi-signal fusion: `max(latency_error, cpu_error * 2)`
 //!
 //! # Examples
 //!
@@ -59,6 +59,7 @@ pub struct PidController {
 
 impl PidController {
     /// Create a new PID controller with default parameters.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             kp: 0.5,
@@ -75,6 +76,7 @@ impl PidController {
     }
 
     /// Customise PID gains.
+    #[must_use]
     pub fn with_gains(mut self, kp: f64, ki: f64, kd: f64) -> Self {
         self.kp = kp;
         self.ki = ki;
@@ -83,6 +85,7 @@ impl PidController {
     }
 
     /// 自訂目標值
+    #[must_use]
     pub fn with_targets(mut self, latency_ms: f64, cpu_percent: f64) -> Self {
         self.target_latency_ms = latency_ms;
         self.target_cpu_percent = cpu_percent;
@@ -90,10 +93,11 @@ impl PidController {
     }
 
     /// 自訂並發範圍
+    #[must_use]
     pub fn with_limits(mut self, min: u32, max: u32) -> Self {
         self.min_concurrency = min;
         self.max_concurrency = max;
-        self.current_limit = (min as f64 + max as f64) / 2.0;
+        self.current_limit = f64::from(min.midpoint(max));
         self
     }
 
@@ -111,7 +115,7 @@ impl PidController {
         // PID 計算
         self.integral += error;
         // 防止積分飽和
-        let max_integral = self.max_concurrency as f64;
+        let max_integral = f64::from(self.max_concurrency);
         self.integral = self.integral.clamp(-max_integral, max_integral);
 
         let derivative = error - self.prev_error;
@@ -123,12 +127,25 @@ impl PidController {
         self.current_limit -= output;
         self.current_limit = self
             .current_limit
-            .clamp(self.min_concurrency as f64, self.max_concurrency as f64);
+            .clamp(f64::from(self.min_concurrency), f64::from(self.max_concurrency));
 
-        self.current_limit as u32
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "current_limit is clamped to [min, max] u32 range"
+        )]
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "current_limit is always non-negative after clamp"
+        )]
+        {
+            self.current_limit as u32
+        }
     }
 
     /// 獲取當前並發限制
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation, reason = "current_limit is clamped to u32 range")]
+    #[expect(clippy::cast_sign_loss, reason = "current_limit is always non-negative")]
     pub fn current_limit(&self) -> u32 {
         self.current_limit as u32
     }
@@ -137,7 +154,7 @@ impl PidController {
     pub fn reset(&mut self) {
         self.integral = 0.0;
         self.prev_error = 0.0;
-        self.current_limit = (self.min_concurrency as f64 + self.max_concurrency as f64) / 2.0;
+        self.current_limit = f64::from(self.min_concurrency.midpoint(self.max_concurrency));
     }
 }
 
@@ -149,6 +166,9 @@ impl Default for PidController {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::float_cmp, reason = "test: comparing exact literal values")]
+    #![expect(clippy::cast_possible_wrap, reason = "test: values are small and won't wrap")]
+
     use super::*;
 
     #[test]
@@ -167,74 +187,47 @@ mod tests {
     fn test_adjust_low_load() {
         let mut pid = PidController::new();
         // 低負載: 延遲低、CPU 低 → 應該增加並發
-        let metrics = SystemMetrics {
-            avg_latency_ms: 50.0,
-            cpu_percent: 30.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 50.0, cpu_percent: 30.0 };
         let limit = pid.adjust(&metrics);
-        assert!(
-            limit > 100,
-            "Should increase concurrency under low load, got {limit}"
-        );
+        assert!(limit > 100, "Should increase concurrency under low load, got {limit}");
     }
 
     #[test]
     fn test_adjust_high_load() {
         let mut pid = PidController::new();
         // 高負載: 延遲高、CPU 高 → 應該降低並發
-        let metrics = SystemMetrics {
-            avg_latency_ms: 200.0,
-            cpu_percent: 90.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 200.0, cpu_percent: 90.0 };
         let limit = pid.adjust(&metrics);
-        assert!(
-            limit < 100,
-            "Should decrease concurrency under high load, got {limit}"
-        );
+        assert!(limit < 100, "Should decrease concurrency under high load, got {limit}");
     }
 
     #[test]
     fn test_adjust_respects_min() {
         let mut pid = PidController::new();
         // 極高負載，多次調整
-        let metrics = SystemMetrics {
-            avg_latency_ms: 1000.0,
-            cpu_percent: 100.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 1000.0, cpu_percent: 100.0 };
         for _ in 0..100 {
             pid.adjust(&metrics);
         }
-        assert!(
-            pid.current_limit() >= 5,
-            "Should not go below min_concurrency"
-        );
+        assert!(pid.current_limit() >= 5, "Should not go below min_concurrency");
     }
 
     #[test]
     fn test_adjust_respects_max() {
         let mut pid = PidController::new();
         // 極低負載，多次調整
-        let metrics = SystemMetrics {
-            avg_latency_ms: 1.0,
-            cpu_percent: 1.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 1.0, cpu_percent: 1.0 };
         for _ in 0..100 {
             pid.adjust(&metrics);
         }
-        assert!(
-            pid.current_limit() <= 200,
-            "Should not exceed max_concurrency"
-        );
+        assert!(pid.current_limit() <= 200, "Should not exceed max_concurrency");
     }
 
     #[test]
     fn test_convergence() {
         let mut pid = PidController::new();
         // 模擬穩定在目標附近
-        let metrics = SystemMetrics {
-            avg_latency_ms: 100.0,
-            cpu_percent: 60.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 100.0, cpu_percent: 60.0 };
         let initial = pid.current_limit();
         for _ in 0..10 {
             pid.adjust(&metrics);
@@ -264,10 +257,7 @@ mod tests {
     #[test]
     fn test_reset() {
         let mut pid = PidController::new();
-        let metrics = SystemMetrics {
-            avg_latency_ms: 200.0,
-            cpu_percent: 90.0,
-        };
+        let metrics = SystemMetrics { avg_latency_ms: 200.0, cpu_percent: 90.0 };
         pid.adjust(&metrics);
         pid.adjust(&metrics);
 
@@ -286,9 +276,6 @@ mod tests {
             cpu_percent: 95.0,     // 遠超目標
         };
         let limit = pid.adjust(&metrics);
-        assert!(
-            limit < 100,
-            "CPU overload should reduce concurrency, got {limit}"
-        );
+        assert!(limit < 100, "CPU overload should reduce concurrency, got {limit}");
     }
 }
