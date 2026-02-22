@@ -1,7 +1,10 @@
 #![warn(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 
-use bose_common::{BoseConfig, ScavengerConfig, SearchQuery, SearchResponse, scavenge};
+use bose_common::{
+    BoseConfig, RRFFusion, RankedResult, ScavengerConfig, SearchQuery, SearchResponse,
+    SearchResult, compute_sha256, extract_text, scavenge,
+};
 use bose_index::searcher::Searcher;
 use bose_searxng::SearxngClient;
 use moka::future::Cache;
@@ -130,10 +133,13 @@ impl BoseSearchServer {
         // Cache miss - fetch from SearXNG
         match self.client.search(&query).await {
             Ok(resp) => {
-                // Store in cache
-                self.cache.insert(cache_key, resp.clone()).await;
+                // Apply RRF fusion across engines before caching
+                let top_n = query.num_results as usize;
+                let fused = fuse_results(&resp, top_n);
+                let fused_resp = SearchResponse { results: fused, ..resp };
+                self.cache.insert(cache_key, fused_resp.clone()).await;
 
-                Ok(CallToolResult::success(vec![Content::text(format_response(&resp))]))
+                Ok(CallToolResult::success(vec![Content::text(format_response(&fused_resp))]))
             }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!("Search failed: {e}"))])),
         }
@@ -194,8 +200,7 @@ impl BoseSearchServer {
             .await
             .map_err(|e| McpError::internal_error(format!("Failed to read response: {e}"), None))?;
 
-        // Strip HTML tags using a simple regex approach
-        let text = strip_html_tags(&html);
+        let text = extract_text(&html);
 
         // Limit to 50KB
         let truncated = if text.len() > MAX_SIZE {
@@ -323,7 +328,7 @@ impl BoseSearchServer {
             match client.get(&result.url).send().await {
                 Ok(response) if response.status().is_success() => {
                     if let Ok(html) = response.text().await {
-                        let text = strip_html_tags(&html);
+                        let text = extract_text(&html);
 
                         // Skip if text is too short (likely error page)
                         if text.len() < 100 {
@@ -338,7 +343,7 @@ impl BoseSearchServer {
                             source: result.engine.clone(),
                             language: "en".to_string(), // TODO: detect language
                             crawled_at: Utc::now(),
-                            relevance_score: 1.0, // TODO: use actual score
+                            relevance_score: result.score.unwrap_or(0.5),
                             tags: vec![params.query.clone()],
                         };
 
@@ -532,57 +537,59 @@ fn format_response(resp: &SearchResponse) -> String {
     out
 }
 
-/// Strip HTML tags from text using a simple regex-like approach.
-/// This is a basic implementation that removes <tag>...</tag> patterns.
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut in_tag = false;
-    let mut in_script_or_style = false;
-    let mut tag_buffer = String::new();
-
-    for ch in html.chars() {
-        if ch == '<' {
-            in_tag = true;
-            tag_buffer.clear();
-        } else if ch == '>' && in_tag {
-            in_tag = false;
-
-            // Check if we're entering or leaving script/style tags
-            let tag_lower = tag_buffer.to_lowercase();
-            if tag_lower.starts_with("script") || tag_lower.starts_with("style") {
-                in_script_or_style = true;
-            } else if tag_lower.starts_with("/script") || tag_lower.starts_with("/style") {
-                in_script_or_style = false;
-            }
-
-            tag_buffer.clear();
-        } else if in_tag {
-            tag_buffer.push(ch);
-        } else if !in_script_or_style {
-            result.push(ch);
-        }
-    }
-
-    // Clean up whitespace
-    result.split_whitespace().collect::<Vec<&str>>().join(" ")
+/// Generate a deterministic, collision-resistant cache key for a search query.
+///
+/// Uses SHA-256 to prevent cache-key injection via crafted query strings.
+fn make_cache_key(query: &SearchQuery) -> String {
+    let raw = format!(
+        "{}|{}|{}|{}|{}",
+        query.query,
+        query.num_results,
+        query.category.as_deref().unwrap_or(""),
+        query.language.as_deref().unwrap_or(""),
+        query.time_range.as_deref().unwrap_or(""),
+    );
+    compute_sha256(&raw)
 }
 
-/// Generate a cache key from search query and parameters.
-/// Uses a simple string concatenation approach for deterministic keys.
-fn make_cache_key(query: &SearchQuery) -> String {
-    use std::fmt::Write;
-    let mut key = format!("q:{}", query.query);
-    let _ = write!(key, "|n:{}", query.num_results);
-    if let Some(ref cat) = query.category {
-        let _ = write!(key, "|c:{cat}");
+/// Reorder `resp.results` by Reciprocal Rank Fusion score across engines.
+///
+/// Per-engine rank is determined by order of appearance in `resp.results`.
+/// Cross-engine consensus bubbles results to the top.
+#[must_use]
+fn fuse_results(resp: &SearchResponse, top_n: usize) -> Vec<SearchResult> {
+    use std::collections::HashMap;
+
+    // Build per-engine ranked lists (position in resp.results = per-engine rank)
+    let mut engine_groups: HashMap<&str, Vec<RankedResult>> = HashMap::new();
+    for result in &resp.results {
+        let group = engine_groups.entry(result.engine.as_str()).or_default();
+        let rank = group.len();
+        group.push(RankedResult { id: result.url.clone(), rank });
     }
-    if let Some(ref lang) = query.language {
-        let _ = write!(key, "|l:{lang}");
+
+    // Accumulate RRF scores across engines
+    let mut fusion = RRFFusion::new();
+    for (engine, ranked) in &engine_groups {
+        fusion.add_results(engine, ranked.clone(), 1.0);
     }
-    if let Some(ref tr) = query.time_range {
-        let _ = write!(key, "|t:{tr}");
+
+    let fused = fusion.fuse(top_n);
+
+    // URL → highest-scored SearXNG result lookup
+    let mut url_map: HashMap<&str, &SearchResult> = HashMap::new();
+    for result in &resp.results {
+        url_map
+            .entry(result.url.as_str())
+            .and_modify(|prev| {
+                if result.score > prev.score {
+                    *prev = result;
+                }
+            })
+            .or_insert(result);
     }
-    key
+
+    fused.into_iter().filter_map(|f| url_map.get(f.id.as_str()).copied().cloned()).collect()
 }
 
 #[tokio::main]
@@ -609,41 +616,6 @@ mod tests {
     #![expect(clippy::unwrap_used, reason = "test code")]
 
     use super::*;
-
-    #[test]
-    fn test_strip_html_tags_simple() {
-        let html = "<p>Hello <b>world</b>!</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Hello world!");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_attributes() {
-        let html = r#"<div class="content"><a href="https://example.com">Link</a></div>"#;
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Link");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_script() {
-        let html = "<p>Before</p> <script>alert('test');</script> <p>After</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Before After");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_style() {
-        let html = "<p>Before</p> <style>body { color: red; }</style> <p>After</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Before After");
-    }
-
-    #[test]
-    fn test_strip_html_tags_whitespace_cleanup() {
-        let html = "<p>Hello   \n\n  world</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Hello world");
-    }
 
     #[tokio::test]
     async fn test_read_url_success() {
@@ -865,22 +837,51 @@ mod tests {
     fn test_make_cache_key() {
         let query1 = SearchQuery::new("rust programming");
         let key1 = make_cache_key(&query1);
-        assert!(key1.contains("q:rust programming"));
-        assert!(key1.contains("|n:10"));
+        // SHA-256 hex digest is always 64 chars
+        assert_eq!(key1.len(), 64);
 
-        let query2 = SearchQuery::new("rust").with_category("it");
-        let key2 = make_cache_key(&query2);
-        assert!(key2.contains("|c:it"));
-
-        // Same query should produce same key
-        let query3 = SearchQuery::new("rust programming");
-        let key3 = make_cache_key(&query3);
+        // Same query → same key (deterministic)
+        let key3 = make_cache_key(&SearchQuery::new("rust programming"));
         assert_eq!(key1, key3);
 
-        // Different query should produce different key
-        let query4 = SearchQuery::new("python programming");
-        let key4 = make_cache_key(&query4);
+        // Different query → different key (collision resistance)
+        let key4 = make_cache_key(&SearchQuery::new("python programming"));
         assert_ne!(key1, key4);
+
+        // Category changes the key
+        let key_no_cat = make_cache_key(&SearchQuery::new("rust"));
+        let key_with_cat = make_cache_key(&SearchQuery::new("rust").with_category("it"));
+        assert_ne!(key_no_cat, key_with_cat);
+    }
+
+    #[test]
+    fn test_fuse_results_cross_engine_wins() {
+        let make_sr = |url: &str, engine: &str, score: f64| SearchResult {
+            title: url.to_string(),
+            url: url.to_string(),
+            snippet: None,
+            engine: engine.to_string(),
+            score: Some(score),
+            category: "general".to_string(),
+        };
+
+        // "https://shared.com" appears at rank 1 (google) AND rank 0 (brave)
+        // → RRF consensus should beat "https://google-only.com" at rank 0 (google-only)
+        let resp = SearchResponse {
+            results: vec![
+                make_sr("https://google-only.com", "google", 1.0),
+                make_sr("https://shared.com", "google", 0.9),
+                make_sr("https://shared.com", "brave", 1.0),
+            ],
+            query: "test".to_string(),
+            elapsed_seconds: 0.1,
+            total_results: None,
+            engines_used: vec!["google".to_string(), "brave".to_string()],
+        };
+
+        let fused = fuse_results(&resp, 10);
+        assert_eq!(fused[0].url, "https://shared.com", "Cross-engine result should rank first");
+        assert_eq!(fused[1].url, "https://google-only.com");
     }
 
     #[tokio::test]
