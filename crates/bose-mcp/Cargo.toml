@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 bose-common = { path = "../bose-common" }
+bose-crawler = { path = "../bose-crawler" }
 bose-searxng = { path = "../bose-searxng" }
 bose-index = { path = "../bose-index" }
 rmcp = { version = "0.14", features = ["server", "transport-io", "macros"] }

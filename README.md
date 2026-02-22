@@ -115,7 +115,7 @@ Bose aims to change that. Beyond conventional search, we're building a "scavengi
 - [x] Local Tantivy knowledge index with full-text search
 - [x] Content crawler with PID-controlled backpressure
 - [ ] Streaming hybrid results — local results first, web results as they arrive
-- [x] Scavenging algorithm — core implementation complete (MCP integration pending)
+- [x] Scavenging algorithm — core implementation complete
 - [ ] SIMD-accelerated BM25 scoring engine (Block-Max WAND)
 - [ ] io_uring async I/O via monoio
 - [ ] Plugin system for custom search backends

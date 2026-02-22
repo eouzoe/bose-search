@@ -5,7 +5,7 @@
 use sysinfo::System;
 
 /// CPU monitor trait — injectable for testing.
-pub trait CpuMonitor: Send {
+pub trait CpuMonitor: Send + Sync {
     fn is_safe(&mut self) -> bool;
     fn snapshot(&mut self) -> SystemSnapshot;
 }

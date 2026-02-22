@@ -2,13 +2,16 @@
 //!
 //! Executes search queries against the Tantivy index.
 
-use crate::schema::fields;
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use tantivy::{
-    Index, IndexReader, ReloadPolicy, collector::TopDocs, query::QueryParser, schema::Value,
-};
+use tantivy::collector::TopDocs;
+use tantivy::query::QueryParser;
+use tantivy::schema::Value;
+use tantivy::{Index, IndexReader, ReloadPolicy};
+
+use crate::schema::fields;
 
 /// 搜尋結果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,10 +174,11 @@ impl Searcher {
 mod tests {
     #![expect(clippy::unwrap_used, reason = "test code")]
 
-    use super::*;
-    use crate::indexer::{Document, Indexer};
     use chrono::Utc;
     use tempfile::TempDir;
+
+    use super::*;
+    use crate::indexer::{Document, Indexer};
 
     fn setup_test_index() -> (TempDir, Searcher) {
         let temp_dir = TempDir::new().unwrap();

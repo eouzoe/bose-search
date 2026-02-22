@@ -1,5 +1,6 @@
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+
+use sha2::{Digest, Sha256};
 
 /// 內容去重器
 ///

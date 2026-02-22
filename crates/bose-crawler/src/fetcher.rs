@@ -3,14 +3,16 @@
 //! Concurrent HTTP fetcher built on reqwest with PID backpressure and system monitoring.
 //! Uses the tokio runtime with PID-controlled dynamic concurrency.
 
-use crate::metrics::CrawlerMetrics;
-use crate::monitor::{CpuMonitor, SystemMonitor};
-use anyhow::Result;
-use bose_common::pid::PidController;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use bose_common::pid::PidController;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
+
+use crate::metrics::CrawlerMetrics;
+use crate::monitor::{CpuMonitor, SystemMonitor};
 
 /// 抓取結果
 #[derive(Debug, Clone)]

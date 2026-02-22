@@ -9,8 +9,9 @@
 //! - Temporal decay resistance: D(r) = quality(r) × ln(1 + `age_years`)
 //! - Submodular selection with (1-1/e) approximation guarantee (Nemhauser 1978)
 
-use crate::SearchResult;
 use std::collections::{HashMap, HashSet};
+
+use crate::SearchResult;
 
 /// Configuration for the scavenger algorithm.
 #[derive(Debug, Clone)]

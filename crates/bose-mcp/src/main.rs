@@ -1,26 +1,27 @@
 #![warn(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 
+use std::fmt::Write;
+use std::time::Duration;
+
 use bose_common::{
     BoseConfig, RRFFusion, RankedResult, ScavengerConfig, SearchQuery, SearchResponse,
     SearchResult, compute_sha256, extract_text, scavenge,
 };
+use bose_crawler::Fetcher;
 use bose_index::searcher::Searcher;
 use bose_searxng::SearxngClient;
 use moka::future::Cache;
-use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt,
-    handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters,
-    model::{
-        CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
-        ToolsCapability,
-    },
-    schemars, tool, tool_handler, tool_router,
-    transport::stdio,
+use rmcp::handler::server::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{
+    CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+    ToolsCapability,
 };
-use std::fmt::Write;
-use std::time::Duration;
+use rmcp::transport::stdio;
+use rmcp::{
+    ErrorData as McpError, ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router,
+};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema, Clone)]
 struct WebSearchParams {
@@ -314,48 +315,53 @@ impl BoseSearchServer {
             )]));
         }
 
-        tracing::info!(count = urls_to_fetch.len(), "Fetching URLs");
+        // Build URL → search-metadata map so we can reconstruct Documents after concurrent fetch
+        let url_meta: std::collections::HashMap<String, &SearchResult> =
+            urls_to_fetch.iter().map(|r| (r.url.clone(), *r)).collect();
+        let url_strings: Vec<String> = url_meta.keys().cloned().collect();
+        let url_count = url_strings.len();
 
-        // Step 2: Fetch URLs and extract text
+        tracing::info!(count = url_count, "Fetching URLs with bose-crawler backpressure");
+
+        // Step 2: Concurrent fetch — PID backpressure + semaphore-bounded concurrency
+        let fetcher = Fetcher::with_backpressure(url_count.min(10), 10)
+            .map_err(|e| McpError::internal_error(format!("Crawler init failed: {e}"), None))?;
+
+        let fetch_results = fetcher.crawl_batch(url_strings).await;
+
         let mut documents = Vec::new();
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .user_agent("bose-search/0.1")
-            .build()
-            .map_err(|e| McpError::internal_error(format!("HTTP client error: {e}"), None))?;
-
-        for result in urls_to_fetch {
-            match client.get(&result.url).send().await {
-                Ok(response) if response.status().is_success() => {
-                    if let Ok(html) = response.text().await {
-                        let text = extract_text(&html);
-
-                        // Skip if text is too short (likely error page)
-                        if text.len() < 100 {
-                            tracing::warn!(url = %result.url, "Skipping: text too short");
-                            continue;
-                        }
-
+        for fetch_result in fetch_results {
+            match fetch_result {
+                Ok(fr) if fr.status == 200 => {
+                    let text = extract_text(&fr.body);
+                    if text.len() < 100 {
+                        tracing::warn!(url = %fr.url, "Skipping: text too short");
+                        continue;
+                    }
+                    if let Some(meta) = url_meta.get(&fr.url) {
                         let doc = Document {
-                            title: result.title.clone(),
+                            title: meta.title.clone(),
                             body: text,
-                            url: result.url.clone(),
-                            source: result.engine.clone(),
+                            url: fr.url.clone(),
+                            source: meta.engine.clone(),
                             language: "en".to_string(), // TODO: detect language
                             crawled_at: Utc::now(),
-                            relevance_score: result.score.unwrap_or(0.5),
+                            relevance_score: meta.score.unwrap_or(0.5),
                             tags: vec![params.query.clone()],
                         };
-
                         documents.push(doc);
-                        tracing::info!(url = %result.url, "Fetched successfully");
+                        tracing::info!(
+                            url = %fr.url,
+                            latency_ms = fr.latency.as_millis(),
+                            "Fetched successfully"
+                        );
                     }
                 }
-                Ok(response) => {
-                    tracing::warn!(url = %result.url, status = %response.status(), "HTTP error");
+                Ok(fr) => {
+                    tracing::warn!(url = %fr.url, status = fr.status, "HTTP error");
                 }
                 Err(e) => {
-                    tracing::warn!(url = %result.url, error = %e, "Fetch failed");
+                    tracing::warn!(url = %e.url, error = %e.error, "Fetch failed");
                 }
             }
         }
@@ -391,10 +397,16 @@ impl BoseSearchServer {
         tracing::info!(count = documents.len(), "Knowledge crawl complete");
 
         // Return summary
+        let crawler_metrics = fetcher.metrics();
         let mut summary = format!(
-            "Successfully crawled and indexed {} documents for query \"{}\":\n\n",
+            "Crawled and indexed {} documents for query \"{}\" \
+             [{} requests, {:.0}% success, avg {:.1}ms, {} bytes]:\n\n",
             documents.len(),
-            params.query
+            params.query,
+            crawler_metrics.total_requests(),
+            crawler_metrics.success_rate() * 100.0,
+            crawler_metrics.avg_latency_ms(),
+            crawler_metrics.total_bytes(),
         );
 
         #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
@@ -619,10 +631,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_url_success() {
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path},
-        };
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -659,10 +669,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_url_http_error() {
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path},
-        };
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -686,10 +694,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_url_size_limit() {
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path},
-        };
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -718,10 +724,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_search_cache_hit() {
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path, query_param},
-        };
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -772,10 +776,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_search_cache_ttl() {
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path, query_param},
-        };
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -887,10 +889,8 @@ mod tests {
     #[tokio::test]
     async fn test_crawl_knowledge_integration() {
         use tempfile::TempDir;
-        use wiremock::{
-            Mock, MockServer, ResponseTemplate,
-            matchers::{method, path, query_param},
-        };
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 

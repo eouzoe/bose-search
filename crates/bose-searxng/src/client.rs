@@ -1,7 +1,9 @@
-use crate::response::SearxngResponse;
-use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
 use std::fmt::Write as _;
 use std::time::Instant;
+
+use bose_common::{BoseConfig, BoseError, BoseResult, SearchQuery, SearchResponse};
+
+use crate::response::SearxngResponse;
 
 /// `SearXNG` HTTP client.
 #[derive(Clone)]
@@ -121,9 +123,10 @@ impl SearxngClient {
 mod tests {
     #![expect(clippy::unwrap_used, reason = "test code")]
 
-    use super::*;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_search_success() {

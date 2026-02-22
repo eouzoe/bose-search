@@ -2,12 +2,14 @@
 //!
 //! Writes documents into the Tantivy index.
 
-use crate::schema::{create_schema, fields};
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use tantivy::{Index, IndexWriter, TantivyDocument, doc};
+
+use crate::schema::{create_schema, fields};
 
 /// 要索引的文檔
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,8 +163,9 @@ impl Indexer {
 mod tests {
     #![expect(clippy::unwrap_used, reason = "test code")]
 
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     fn create_test_document() -> Document {
         Document {
