@@ -31,3 +31,7 @@ SESSION_LOG.md
 openspec/
 .mcp.json
 /src/
+
+# Nix
+result
+.direnv
