@@ -133,6 +133,90 @@
       ],
       "acceptance": "feature_list.json contains all planned features with passes status",
       "passes": false
+    },
+    {
+      "id": "F009",
+      "category": "algorithm",
+      "priority": "P0",
+      "description": "QMD: query expansion skip — skip redundant query expansion in router",
+      "beads_id": null,
+      "steps": [
+        "Add skip logic in crates/bose-mcp/src/router.rs",
+        "Write unit test verifying skip condition"
+      ],
+      "acceptance": "cargo test router && grep -r 'skip' crates/bose-mcp/src/router.rs has results",
+      "passes": false
+    },
+    {
+      "id": "F010",
+      "category": "algorithm",
+      "priority": "P1",
+      "description": "QMD: RRF fusion — Reciprocal Rank Fusion for multi-engine result merging",
+      "beads_id": null,
+      "steps": [
+        "Create crates/bose-common/src/fusion.rs",
+        "Implement RRF algorithm",
+        "Add proptest property tests",
+        "Integrate into search pipeline"
+      ],
+      "acceptance": "cargo test fusion && criterion bench shows RRF improves result ordering",
+      "passes": false
+    },
+    {
+      "id": "F011",
+      "category": "algorithm",
+      "priority": "P1",
+      "description": "QMD: position-aware blending — blend results by source position weight",
+      "beads_id": null,
+      "steps": [
+        "Create crates/bose-common/src/blending.rs",
+        "Implement position-aware weight formula",
+        "Add proptest tests"
+      ],
+      "acceptance": "cargo test blending",
+      "passes": false
+    },
+    {
+      "id": "F012",
+      "category": "algorithm",
+      "priority": "P1",
+      "description": "QMD: content deduplication — remove near-duplicate results by URL/content hash",
+      "beads_id": null,
+      "steps": [
+        "Create crates/bose-common/src/dedup.rs",
+        "Implement URL normalization + content hash dedup",
+        "Add proptest tests"
+      ],
+      "acceptance": "cargo test dedup && duplicate URLs removed from results",
+      "passes": false
+    },
+    {
+      "id": "F013",
+      "category": "algorithm",
+      "priority": "P2",
+      "description": "QMD: document chunking — split fetched documents into indexable chunks",
+      "beads_id": null,
+      "steps": [
+        "Create crates/bose-common/src/chunker.rs",
+        "Implement sliding window chunker",
+        "Add insta snapshot tests"
+      ],
+      "acceptance": "cargo test chunker && insta snapshots pass",
+      "passes": false
+    },
+    {
+      "id": "F014",
+      "category": "mcp-tool",
+      "priority": "P2",
+      "description": "QMD: MCP structured response — return typed SearchResult instead of raw text",
+      "beads_id": null,
+      "steps": [
+        "Update crates/bose-mcp/src/tools.rs response format",
+        "Add title/url/snippet/score fields",
+        "Update integration tests"
+      ],
+      "acceptance": "MCP web_search returns structured JSON with title/url/snippet fields",
+      "passes": false
     }
   ]
 }

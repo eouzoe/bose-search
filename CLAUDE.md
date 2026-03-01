@@ -13,18 +13,11 @@
 - **用戶語言**: 繁體中文
 - **品質標準**: 對標 ripgrep / tantivy 等頂級 Rust 專案
 
-### ⚠️ 強制規則：搜尋工具使用
+### 搜尋工具 & 全域規範
 
-**所有 Agent 必須遵守以下規則：**
-
-1. **預設使用 bose-search**: 所有網路搜尋任務必須使用 `bose-search` MCP 工具
-2. **困難情況才用 Exa**: 只有在以下困難情況下才使用 Exa MCP 工具：
-   - bose-search 搜尋結果品質不佳或無法找到答案
-   - 需要深度語義理解的複雜查詢（如學術論文、技術文檔）
-   - 需要 Exa 特有的 `contents` 或 `highlights` 功能
-   - 查詢需要更高的語義匹配精度
-
-**違反此規則將被視為錯誤行為。先用 bose-search，不行再用 Exa。**
+搜尋工具優先級見 `~/.claude/rules/quality-baseline.md`（bose-search → Exa → Context7）。
+全域代碼風格見 `~/.claude/rules/bose-style.md`。
+雙窗口工作流見 `~/.claude/rules/workflow.md`。
 
 ---
 
@@ -236,48 +229,17 @@ nix-env -iA nixpkgs.cargo-deny
 # ... 其他工具
 ```
 
-## 5.5 雙窗口任務隊列 (.harness/)
+## 5.5 雙窗口工作流
 
-**基於 Anthropic "Effective Harnesses for Long-Running Agents" 設計。**
+見 `~/.claude/rules/workflow.md`（全域）+ `~/src/active/.harness/prompts/coding-agent.xml`。
 
-### 工作模式
-- **Opus 窗口**: 規劃、審核、dispatch 任務到隊列
-- **執行窗口**: Sonnet/Haiku 從隊列取任務、實作、測試、提交
+專案特有：啟動前先跑 `bash init.sh` 確保 SearXNG 容器運行。
 
-### 執行 Agent 啟動流程
 ```bash
-# 1. 讀取本文件
-# 2. 了解進度
-cat .harness/progress.md
-git log --oneline -5
-
-# 3. 啟動環境
-bash init.sh
-
-# 4. 驗證代碼
-cargo test --workspace
-
-# 5. 取任務
-bd ready
-bd show <task-id>
-bd update <task-id> --status=in_progress
-
-# 6. 讀取詳細步驟
-cat .harness/feature_list.json | jq '.features[] | select(.beads_id == "<task-id>")'
+# 啟動執行窗口
+cd ~/src/active/bose-search && claude --model sonnet --dangerously-skip-permissions -p \
+  "讀取 @CLAUDE.md @.harness/feature_list.json @.harness/progress.md @~/src/active/.harness/prompts/coding-agent.xml 然後 bd ready 開始工作"
 ```
-
-### 關鍵文件
-| 文件 | 用途 | 誰改 |
-|------|------|------|
-| `.harness/feature_list.json` | 功能清單 (JSON) | 只改 passes 欄位 |
-| `.harness/progress.md` | 跨 session 進度 | 每次 session 結束更新 |
-| `.harness/prompts/coding.md` | 執行 Agent 完整指令 | Opus 維護 |
-
-### 鐵則
-1. **一次一功能** — 不要嘗試同時實作多個 feature
-2. **只改 passes 欄位** — 不要修改 feature_list.json 的描述或步驟
-3. **乾淨狀態** — 結束時代碼必須編譯通過、測試通過、clippy 零警告
-4. **先測試再實作** — TDD: RED → GREEN → REFACTOR
 
 ---
 
