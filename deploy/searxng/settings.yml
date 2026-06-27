@@ -7,6 +7,13 @@ search:
   formats:
     - html
     - json
+  suspended_times:
+    SearxEngineAccessDenied: 0
+    SearxEngineCaptcha: 0
+    SearxEngineTooManyRequests: 0
+    cf_SearxEngineCaptcha: 0
+    cf_SearxEngineAccessDenied: 0
+    recaptcha_SearxEngineCaptcha: 0
 
 server:
   secret_key: "bose-search-secret"
@@ -14,22 +21,43 @@ server:
   image_proxy: false
 
 outgoing:
-  request_timeout: 5.0
-  max_request_timeout: 10.0
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  proxies:
+    all://:
+      - socks5h://tor:9150
 
 engines:
+  - name: startpage
+    weight: 3.0
   - name: github
     weight: 3.0
   - name: stackoverflow
     weight: 3.0
   - name: google
-    weight: 1.5
+    disabled: true
   - name: bing
     weight: 1.0
   - name: duckduckgo
-    weight: 1.0
+    disabled: true
   - name: brave
     weight: 1.0
+    proxies: {}
+  - name: mojeek
+    weight: 1.0
+  - name: mwmbl
+    weight: 1.0
+  - name: presearch
+    weight: 1.0
+  - name: yacy
+    weight: 1.0
+    base_url:
+      - https://yacy.searchlab.eu
+      - https://search.lomig.me
+  - name: yahoo
+    weight: 1.0
+  - name: wikipedia
+    weight: 2.0
   - name: youtube
     disabled: true
   - name: dailymotion

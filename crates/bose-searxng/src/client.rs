@@ -18,7 +18,7 @@ impl SearxngClient {
     /// Returns an error if the underlying HTTP client cannot be built.
     pub fn new(config: &BoseConfig) -> BoseResult<Self> {
         let http = reqwest::Client::builder()
-            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .tcp_keepalive(std::time::Duration::from_mins(1))
             .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
             .user_agent("bose-search/0.1")
             .build()

@@ -210,7 +210,7 @@ impl Fetcher {
         let mut remaining_urls: Vec<_> = urls.into_iter().collect();
 
         let start_time = Instant::now();
-        let total_timeout = Duration::from_secs(300); // 5 分鐘
+        let total_timeout = Duration::from_mins(5);
         let adjustment_interval = Duration::from_secs(1);
         let mut last_adjustment = Instant::now();
 
@@ -332,7 +332,7 @@ mod tests {
         let err = FetchError {
             url: "https://bad.com".to_string(),
             error: "timeout".to_string(),
-            latency: Duration::from_millis(5000),
+            latency: Duration::from_secs(5),
         };
         assert_eq!(err.error, "timeout");
     }

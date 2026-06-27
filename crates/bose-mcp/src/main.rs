@@ -95,13 +95,13 @@ impl BoseSearchServer {
     fn new(client: SearxngClient, index_path: String) -> Self {
         // Create cache with 5min TTL and max 1000 entries
         let cache =
-            Cache::builder().max_capacity(1000).time_to_live(Duration::from_secs(5 * 60)).build();
+            Cache::builder().max_capacity(1000).time_to_live(Duration::from_mins(5)).build();
 
         Self { client, index_path, tool_router: Self::tool_router(), cache }
     }
 
     #[tool(
-        description = "Search the web via SearXNG meta-search engine (247 engines). Returns title, URL, snippet, source engine, and category for each result."
+        description = "Search the web via SearXNG meta-search engine (247 engines). Returns title, URL, snippet, source engine, and category for each result. Requires SearXNG service running on localhost:8080."
     )]
     async fn web_search(
         &self,
@@ -135,11 +135,15 @@ impl BoseSearchServer {
 
                 Ok(CallToolResult::success(vec![Content::text(format_response(&resp))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!("Search failed: {e}"))])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
+            ))])),
         }
     }
 
-    #[tool(description = "Check if the SearXNG search backend is healthy and responding.")]
+    #[tool(
+        description = "Check if the SearXNG search backend is healthy and responding. Use this first to verify SearXNG is running before calling web_search."
+    )]
     async fn health_check(&self) -> Result<CallToolResult, McpError> {
         match self.client.health_check().await {
             Ok(true) => Ok(CallToolResult::success(vec![Content::text("SearXNG is healthy")])),
@@ -284,7 +288,7 @@ impl BoseSearchServer {
             Ok(resp) => resp,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Search failed: {e}"
+                    "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
                 ))]));
             }
         };
@@ -427,7 +431,7 @@ impl BoseSearchServer {
             Ok(r) => r,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Search failed: {e}"
+                    "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
                 ))]));
             }
         };
@@ -493,9 +497,11 @@ impl ServerHandler for BoseSearchServer {
                 website_url: None,
             },
             instructions: Some(
-                "Bose Search — meta-search engine powered by SearXNG with 247 backends. \
-                 Use web_search to find information on any topic. \
-                 Use local_search to search the local knowledge index (<10ms)."
+                "Bose Search — meta-search engine powered by SearXNG (247 backends).\n\
+                 Requires SearXNG running at SEARXNG_URL (default http://localhost:8080).\n\
+                 Start SearXNG first:\n  cd deploy && podman-compose up -d\n\
+                 Uses docker.io/searxng/searxng:latest + peterdavehello/tor-socks-proxy \
+                 for anti-blocking."
                     .into(),
             ),
         }
