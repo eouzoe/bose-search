@@ -32,8 +32,12 @@ pre-push:
     deny:
       run: cargo deny check
 
+    # Incremental by design. `detect --no-git` walks the entire history and
+    # took 264s on every push, which is a gate nobody keeps enabled.
+    # `protect --staged` scans only what is being committed, and runs in
+    # seconds. A full history sweep is a release action: `just security-full`.
     gitleaks:
-      run: gitleaks detect --no-git --verbose
+      run: gitleaks protect --staged --verbose
 
 commit-msg:
   commands:
@@ -41,7 +45,7 @@ commit-msg:
       run: |
         # Check if commit message follows conventional commits format
         # Format: <type>(<scope>): <subject>
-        # Types: feat, fix, docs, style, refactor, perf, test, chore
+        # Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
         msg=$(cat {1})
         if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+'; then
           echo "❌ Commit message must follow conventional commits format:"

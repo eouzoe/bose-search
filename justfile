@@ -40,3 +40,14 @@ register: build
 # Stop the process manager.
 down:
     devenv processes down
+
+# Full secret sweep across the entire history. Slow (~4 min) and deliberately
+# NOT in the pre-push gate: that one is incremental (`gitleaks protect
+# --staged`). Run this on a release, or after rotating a credential.
+security-full:
+    gitleaks detect --no-git --verbose
+
+# Security gate as CI would run it: everything, not just the staged diff.
+ci-security: security-full
+    cargo audit
+    cargo deny check
