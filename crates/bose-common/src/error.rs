@@ -16,6 +16,9 @@ pub enum BoseError {
 
     #[error("查詢無效: {0}")]
     InvalidQuery(String),
+
+    #[error("IO 失敗: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
 pub type BoseResult<T> = Result<T, BoseError>;

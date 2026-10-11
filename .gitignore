@@ -35,3 +35,4 @@ openspec/
 # Nix
 result
 .direnv
+.devenv/

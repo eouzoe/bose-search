@@ -1,125 +1,121 @@
 # Bose Search
 
-[![CI](https://github.com/eouzoe/bose-search/actions/workflows/ci.yml/badge.svg)](https://github.com/eouzoe/bose-search/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Rust](https://img.shields.io/badge/rust-1.82%2B-orange.svg)](https://www.rust-lang.org/)
-
 Zero-cost, high-performance search for AI agents via [Model Context Protocol](https://modelcontextprotocol.io/).
 
-Bose aggregates 247 search engines through [SearXNG](https://docs.searxng.org/) and maintains a local knowledge index powered by [Tantivy](https://github.com/quickwit-oss/tantivy) — exposed as MCP tools that any compatible client can use straightaway.
+Bose aggregates search engines through [SearXNG](https://docs.searxng.org/) and maintains a local knowledge index powered by [Tantivy](https://github.com/quickwit-oss/tantivy) — exposed as MCP tools that any compatible client can use straightaway.
 
 ## Why
 
-Paid search APIs burn through credits remarkably fast. Built-in LLM search is slow and unreliable. Bose gives your AI agent access to the entire web and a persistent local knowledge base, at no cost whatsoever.
+Paid search APIs burn through credits remarkably fast. Built-in LLM search is slow and unreliable. Bose gives your AI agent access to the open web and a persistent local knowledge base, at no cost whatsoever — and it **fetches each URL once**.
 
-- **247 engines** — Google, Brave, DuckDuckGo, Startpage, and 243 more via SearXNG
-- **Local index** — Sub-10ms full-text search over crawled content via Tantivy
-- **MCP native** — Works with Claude Code, Cursor, Windsurf, and any MCP-compatible client
-- **Self-hosted** — Your queries never leave your machine
-- **Single binary** — One Rust executable, minimal resource footprint
+- **SearXNG meta-search** — one query fans out to a pool of engines; the response says which ones answered and which did not
+- **On-disk response cache** — a URL fetched once is never fetched again until its TTL expires. The dominant access pattern for reference material is "read once, re-read many"
+- **Local index** — full-text search over crawled content via Tantivy, opened once per process
+- **MCP 2026-07-28** — stateless core, with the 2025-11-25 handshake kept for legacy clients
+- **Single binary** — one Rust executable, minimal resource footprint
 
 ## Quick Start
 
-**Prerequisites:** [Rust](https://rustup.rs/) 1.82+ and [Podman](https://podman.io/) 4.0+ (or Docker).
+**Prerequisites:** [devenv](https://devenv.sh/) and Rust 1.98+.
 
 ```bash
-# 1. Install
-cargo install --git https://github.com/eouzoe/bose-search.git bose-search
+# 1. Start SearXNG (Nix-packaged, no container runtime involved)
+devenv up
 
-# 2. Start SearXNG
-podman run -d -p 8080:8080 --name searxng docker.io/searxng/searxng:latest
+# 2. Build
+cargo build --release -p bose-search
 
-# 3. Register with Claude Code
-claude mcp add bose-search \
-  -e SEARXNG_URL=http://localhost:8080 \
-  -- bose-search
+# 3. Register with your host
+#    Claude Code auto-discovers .mcp.json in this directory.
+#    Otherwise, point your MCP client at target/release/bose-search.
 ```
 
-Your AI agent now has access to 247 search engines.
+`devenv` is a hard dependency for *developing and running* bose-search — it owns the SearXNG process and the whole toolchain. The MCP server itself is still a plain binary: registering `devenv shell -- bose-search` with a host would add a Nix evaluation to every agent session, so the built binary is what you point at.
 
 ## Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `web_search` | Query the web via 247 engines | `query`, `num_results`, `category`, `language`, `time_range` |
-| `local_search` | Query the local knowledge index (<10ms) | `query`, `num_results` |
-| `health_check` | Verify SearXNG connectivity | — |
+| `web_search` | Query the web through SearXNG; reports which engines answered | `query`, `num_results`, `category`, `language`, `time_range` |
+| `local_search` | Query the local knowledge index | `query`, `num_results` |
+| `read_url` | Fetch a URL to clean text (charset-detected, entity-decoded, 50KB cap) | `url` |
+| `crawl_knowledge` | Search → fetch → extract → index, reporting cache hits and per-URL failures | `query`, `depth`, `source_filter` |
+| `scavenger_search` | Surface results mainstream engines systematically miss | `query`, `harvest_size`, `num_results`, `category`, `language` |
+| `recall` | Read a stored response back with its crawl timestamp, no network | `url` |
+| `health_check` | SearXNG reachability + index size + cache entry count | — |
 
 ## Architecture
 
 ```
 crates/
-├── bose-search/     MCP server entry point (rmcp 0.14)
-├── bose-searxng/    SearXNG HTTP client
-├── bose-common/     Shared types, configuration, algorithms
-├── bose-index/      Tantivy local index
-└── bose-crawler/    Content fetcher with PID backpressure control
+├── bose-common/     Shared types, configuration, errors, algorithms
+├── bose-searxng/    SearXNG HTTP client (engine health carried through)
+├── bose-index/      Tantivy index + a process-lifetime Searcher handle
+├── bose-net/        Shared HTTP client, DOM extraction, on-disk response cache
+├── bose-crawler/    Fetcher with PID-controlled backpressure
+└── bose-search/     MCP server entry point (rmcp 3.5)
 ```
 
-> **Note**: `bose-crawler` is included as an experimental crate. It provides PID-controlled rate limiting and HTTP fetching primitives but is not yet integrated into the main binary.
+Every outbound fetch goes through `bose-net`, so there is exactly one connection pool, one extractor, and one cache. `SearcherHandle` opens the Tantivy index at most once per process.
 
-## Algorithms
+### Configuration
 
-Bose implements several ranking and processing algorithms:
-
-- **RRF Fusion** (`bose-common/fusion.rs`) — Reciprocal Rank Fusion merges ranked lists from multiple search engines into a single ordering, without needing score calibration across sources.
-- **Position-aware Blending** (`bose-common/blending.rs`) — Interleaves results from different backends while preserving positional relevance signals.
-- **PID Backpressure** (`bose-crawler/pid.rs`) — A proportional-integral-derivative controller that dynamically adjusts crawl rate based on server response latency, preventing overload.
-- **SHA-256 Deduplication** (`bose-common/dedup.rs`) — Content-hash based dedup that eliminates duplicate results across engines.
-- **Document Chunking** (`bose-common/chunker.rs`) — Splits large documents into indexable segments with configurable overlap for context preservation.
-- **HTML Extraction** (`bose-common/extractor.rs`) — Strips markup to extract clean text content for indexing.
-- **Query Expansion Router** (`bose-search/router.rs`) — Routes queries to the optimal combination of backends based on query characteristics.
-- **Scavenger Algorithm** (`bose-common/scavenger.rs`) — Information-theoretic surprise scoring S(r) = −log₂(freq(r)/|E|) surfaces results that mainstream engines systematically miss. Greedy submodular selection with (1−1/e) approximation guarantee (Nemhauser et al. 1978) ensures diversity-aware top-k retrieval.
-
-## SearXNG Deployment
-
-Bose uses [SearXNG](https://docs.searxng.org/) as its meta-search backend. A `podman-compose.yml` is included in `deploy/`:
-
-```bash
-cd deploy && podman-compose up -d
-```
-
-This starts SearXNG on port 8080 with JSON API enabled and 4 default engines (Google, Brave, DuckDuckGo, Startpage). You can add more engines by editing `deploy/searxng/settings.yml`.
-
-## Configuration
-
-All settings are read from environment variables.
+All settings come from environment variables.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SEARXNG_URL` | `http://localhost:8080` | SearXNG instance URL |
+| `SEARXNG_URL` | `http://127.0.0.1:8080` | SearXNG endpoint |
 | `DEFAULT_NUM_RESULTS` | `10` | Results per query |
-| `REQUEST_TIMEOUT_SECS` | `30` | HTTP request timeout in seconds |
-| `BOSE_INDEX_PATH` | `$XDG_DATA_HOME/bose-search/index` | Local index directory |
+| `REQUEST_TIMEOUT_SECS` | `30` | HTTP timeout |
+| `BOSE_INDEX_PATH` | `$XDG_DATA_HOME/bose-search/index` | Index directory |
+| `BOSE_CACHE_PATH` | `$XDG_CACHE_HOME/bose-search/responses` | Response cache directory |
+| `BOSE_CACHE_TTL_SECS` | `604800` (7 days) | Cache freshness; `0` bypasses the cache entirely |
 
-## Building from Source
+## Protocol support
 
-```bash
-git clone https://github.com/eouzoe/bose-search.git
-cd bose-search
-cargo build --release -p bose-search
+`devenv shell -- just probe` prints both eras side by side:
+
+```
+### LEGACY ERA (initialize handshake)
+  initialize  -> protocolVersion=2025-11-25
+  tools/list  -> resultType=None n=7
+
+### MODERN ERA (2026-07-28, stateless)
+  discover    -> ['2024-11-05', …, '2026-07-28']
+                resultType=complete ttlMs=0 cacheScope=private
+  tools/list  -> resultType=complete n=7
 ```
 
-The binary will be at `target/release/bose-search`.
+A 2026-07-28 server cannot name the new revision from `initialize`, because that revision has no handshake at all — it answers `2025-11-25` and advertises the full range through `server/discover`. Legacy clients therefore keep working unchanged.
 
-## Vision
+## SearXNG
 
-Search engines surface what's popular, promoted, and paid for. Countless works — small projects, niche research, personal creations — get buried and forgotten over time.
+`devenv up` runs `pkgs.searxng`, reading `deploy/settings.yml` — a plain file you can read and diff, rather than a container image. **Engines are fetched directly by default.** The previous configuration routed every engine through a Tor SOCKS proxy, which meant every query paid three extra hops and then failed once that proxy stopped; anonymity is now opt-in per engine (`proxies:`) rather than global.
 
-Bose aims to change that. Beyond conventional search, we're building a "scavenging" algorithm inspired by biological decomposition and swarm intelligence: finding value in what others overlook. The long-term goal is to break through the filter bubble and help people discover content they'd never encounter through mainstream channels.
+Which engines actually answer depends on your IP: shared and datacenter addresses are throttled by Google, DuckDuckGo and Brave. The tool output names the ones that answered and the ones that did not, so an empty result set is interpretable instead of merely empty.
+
+## Algorithms
+
+- **RRF Fusion** (`bose-common/fusion.rs`) — Reciprocal Rank Fusion merges ranked lists from multiple engines
+- **Position-aware Blending** (`bose-common/blending.rs`) — Interleaves results while preserving positional relevance
+- **PID Backpressure** (`bose-crawler/pid.rs`) — Concurrency controller driven by latency and CPU
+- **SHA-256 Deduplication** (`bose-common/dedup.rs`) — Content-hash dedup across engines
+- **Document Chunking** (`bose-common/chunker.rs`) — Splitting with configurable overlap
+- **Scavenger Algorithm** (`bose-common/scavenger.rs`) — Information-theoretic surprise scoring `S(r) = −log₂(freq(r)/|E|)` with greedy submodular selection `(1−1/e)` approximation
 
 ## Roadmap
 
-- [x] SearXNG meta-search integration (247 engines)
-- [x] MCP server with structured tool responses
-- [x] Local Tantivy knowledge index with full-text search
-- [x] Content crawler with PID-controlled backpressure
-- [ ] Streaming hybrid results — local results first, web results as they arrive
-- [x] Scavenging algorithm — core implementation complete (MCP integration pending)
-- [ ] SIMD-accelerated BM25 scoring engine (Block-Max WAND)
-- [ ] io_uring async I/O via monoio
-- [ ] Plugin system for custom search backends
+- [x] ScanXNG meta-search integration
+- [x] MCP 2026-07-28 stateless core (dual-era with legacy clients)
+- [x] Persistent on-disk response cache (`recall`, `BOSE_CACHE_TTL_SECS`)
+- [x] Shared HTTP/extraction layer replacing three per-call client constructions
+- [x] UTF-8-safe truncation (the old byte-slice truncated mid-code-point)
+- [ ] Direct-engine tier with browser TLS fingerprinting (`wreq`), for targets that block SearXNG
+- [ ] `bose-tor`: in-process arti SOCKS proxy, opt-in per request
+- [ ] Common Crawl CDX tier for already-archived pages
 
 ## Licence
 
-Licensed under either of [Apache Licence, Version 2.0](LICENSE-APACHE) or [MIT Licence](LICENSE-MIT) at your option.
+Licensed under either [Apache Licence, Version 2.0](LICENSE-APACHE) or [MIT Licence](LICENSE-MIT) at your option.
+
+SearXNG, run as a separate process by `devenv`, is licensed AGPL-3.0-or-later. It is not linked into this project.

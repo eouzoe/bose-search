@@ -6,6 +6,7 @@ members = [
   "crates/bose-mcp",
   "crates/bose-index",
   "crates/bose-crawler",
+  "crates/bose-net",
 ]
 
 [workspace.package]
@@ -38,3 +39,4 @@ monoio = { version = "0.2", features = ["iouring", "macros"] }
 sysinfo = "0.33"
 dirs = "6"
 moka = { version = "0.12", features = ["future"] }
+sha2 = { version = "0.10", features = ["std"] }

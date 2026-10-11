@@ -2,7 +2,8 @@
 #![deny(clippy::unwrap_used)]
 
 use bose_common::{BoseConfig, ScavengerConfig, SearchQuery, SearchResponse, scavenge};
-use bose_index::searcher::Searcher;
+use bose_index::SearcherHandle;
+use bose_net::Net;
 use bose_searxng::SearxngClient;
 use moka::future::Cache;
 use rmcp::{
@@ -16,7 +17,7 @@ use rmcp::{
     transport::stdio,
 };
 use std::fmt::Write;
-use std::time::Duration;
+use std::sync::Arc;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema, Clone)]
 struct WebSearchParams {
@@ -48,6 +49,12 @@ struct LocalSearchParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ReadUrlParams {
     #[schemars(description = "The URL to fetch")]
+    url: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RecallParams {
+    #[schemars(description = "The URL to recall from the local response cache")]
     url: String,
 }
 
@@ -84,22 +91,32 @@ struct ScavengerSearchParams {
 #[derive(Clone)]
 struct BoseSearchServer {
     client: SearxngClient,
-    index_path: String,
+    /// Shared HTTP/extraction/cache layer. One connection pool for every tool.
+    net: Arc<bose_net::Net>,
+    /// Lazily-opened, process-lifetime index handle. Owns the index path.
+    index: SearcherHandle,
     cache: Cache<String, SearchResponse>,
 }
 
 #[tool_router]
 impl BoseSearchServer {
-    fn new(client: SearxngClient, index_path: String) -> Self {
+    fn new(client: SearxngClient, net: bose_net::Net, index_path: String) -> Self {
         // Create cache with 5min TTL and max 1000 entries
-        let cache =
-            Cache::builder().max_capacity(1000).time_to_live(Duration::from_mins(5)).build();
+        let cache = Cache::builder()
+            .max_capacity(1000)
+            .time_to_live(std::time::Duration::from_mins(5))
+            .build();
 
-        Self { client, index_path, cache }
+        Self {
+            client,
+            net: Arc::new(net),
+            index: bose_index::SearcherHandle::new(index_path),
+            cache,
+        }
     }
 
     #[tool(
-        description = "Search the web via SearXNG meta-search engine (247 engines). Returns title, URL, snippet, source engine, and category for each result. Requires SearXNG service running on localhost:8080."
+        description = "Search the web through SearXNG meta-search. Returns title, URL, snippet, source engine and category per result. SearXNG aggregates many engines; the ones it could actually reach are listed in the response footer, so an empty result set means \"no engine answered\" rather than \"nothing exists\"."
     )]
     async fn web_search(
         &self,
@@ -136,91 +153,113 @@ impl BoseSearchServer {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format_response(&resp))]))
             }
             Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
+                "SearXNG is not reachable at the configured SEARXNG_URL.\n\
+                 Start it with `devenv up`, or set SEARXNG_URL to a running instance.\n\
+                 This is a transport-level failure, not an empty result.\nError: {e}"
             ))])),
         }
     }
 
     #[tool(
-        description = "Check if the SearXNG search backend is healthy and responding. Use this first to verify SearXNG is running before calling web_search."
+        description = "Report SearXNG reachability, local index size, and on-disk response-cache entry count. Call this first when a search comes back empty."
     )]
     async fn health_check(&self) -> Result<CallToolResult, McpError> {
+        let mut lines = Vec::new();
+
         match self.client.health_check().await {
-            Ok(true) => Ok(CallToolResult::success(vec![ContentBlock::text("SearXNG is healthy")])),
-            Ok(false) => {
-                Ok(CallToolResult::error(vec![ContentBlock::text("SearXNG is not responding")]))
-            }
-            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "Health check failed: {e}"
-            ))])),
+            Ok(true) => lines.push("searxng: healthy".to_string()),
+            Ok(false) => lines.push("searxng: NOT RESPONDING".to_string()),
+            Err(e) => lines.push(format!("searxng: error — {e}")),
+        }
+
+        match self.index.get().map(|s| s.num_docs()) {
+            Some(n) => lines.push(format!("local_index: {n} documents")),
+            None => lines.push("local_index: not yet created".to_string()),
+        }
+
+        match self.net.cache.count().await {
+            Ok(n) => lines
+                .push(format!("response_cache: {n} entries ({})", self.net.cache.root().display())),
+            Err(_) => lines.push("response_cache: disabled".to_string()),
+        }
+
+        let healthy = lines.first().is_some_and(|l| l.starts_with("searxng: healthy"));
+        let out = lines.join("\n");
+        if healthy {
+            Ok(CallToolResult::success(vec![ContentBlock::text(out)]))
+        } else {
+            Ok(CallToolResult::error(vec![ContentBlock::text(out)]))
         }
     }
 
     #[tool(
-        description = "Fetch a specific URL and return clean text content (HTML tags stripped, max 50KB)."
+        description = "Fetch a specific URL and return clean text content (HTML parsed to text, entities decoded, charset detected, max 50KB). Serves from the local response cache when the URL was fetched before."
     )]
     async fn read_url(
         &self,
         Parameters(params): Parameters<ReadUrlParams>,
     ) -> Result<CallToolResult, McpError> {
-        use std::time::Duration;
-
         const MAX_SIZE: usize = 50 * 1024;
 
         tracing::info!(url = %params.url, "Fetching URL");
 
-        // Create a client with 10s timeout
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .user_agent("bose-search/0.1")
-            .build()
-            .map_err(|e| {
-                McpError::internal_error(format!("Failed to create HTTP client: {e}"), None)
-            })?;
-
-        // Fetch the URL
-        let response = client
-            .get(&params.url)
-            .send()
-            .await
-            .map_err(|e| McpError::internal_error(format!("Failed to fetch URL: {e}"), None))?;
-
-        if !response.status().is_success() {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "HTTP error: {}",
-                response.status()
-            ))]));
-        }
-
-        // Get the response body as text
-        let html = response
-            .text()
-            .await
-            .map_err(|e| McpError::internal_error(format!("Failed to read response: {e}"), None))?;
-
-        // Strip HTML tags using a simple regex approach
-        let text = strip_html_tags(&html);
-
-        // Limit to 50KB
-        let truncated = if text.len() > MAX_SIZE {
-            format!("{}... [truncated]", &text[..MAX_SIZE])
-        } else {
-            text
+        // A bad URL or dead host is a normal tool outcome, not a protocol
+        // error: report it as `isError: true` so the agent can react to it
+        // instead of seeing the connection drop.
+        let page = match self.net.fetch_text(&params.url).await {
+            Ok(p) => p,
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(format!("{e}"))])),
         };
 
-        tracing::info!(url = %params.url, size = truncated.len(), "URL fetched successfully");
+        let text = page.text();
+        // UTF-8-safe: never slices on a code-point boundary.
+        let truncated = bose_net::truncate_with_marker(&text, MAX_SIZE);
+
+        tracing::info!(
+            url = %params.url,
+            bytes = text.len(),
+            returned = truncated.len(),
+            from_cache = page.from_cache,
+            "URL fetched successfully"
+        );
 
         Ok(CallToolResult::success(vec![ContentBlock::text(truncated)]))
     }
 
+    #[tool(description = "Read a previously fetched page straight from the local response cache, \
+                       without touching the network. Returns the raw stored response with its \
+                       crawl timestamp, so any result can be audited later. Returns an error if \
+                       the URL was never fetched.")]
+    async fn recall(
+        &self,
+        Parameters(params): Parameters<RecallParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.net.cache.lookup(&params.url).await {
+            Some((meta, body)) => {
+                let text = bose_net::decode_bytes(&body);
+                let truncated = bose_net::truncate_with_marker(&text, 50 * 1024);
+                let out = format!(
+                    "url: {}\nfetched_at: {} (unix seconds)\nstatus: {}\nbytes: {}\nsource: {}\n\n{}",
+                    meta.url, meta.fetched_at, meta.status, meta.bytes, "response cache", truncated
+                );
+                Ok(CallToolResult::success(vec![ContentBlock::text(out)]))
+            }
+            None => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "No cached response for {}. Fetch it first with read_url.",
+                params.url
+            ))])),
+        }
+    }
+
     #[tool(
-        description = "Search the local Tantivy knowledge index. Returns results from previously crawled and indexed content. Faster than web search (<10ms)."
+        description = "Search the local Tantivy knowledge index over previously crawled and indexed content. Sub-millisecond and no network."
     )]
     async fn local_search(
         &self,
         Parameters(params): Parameters<LocalSearchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let Ok(searcher) = Searcher::new(&self.index_path) else {
+        // Open the index at most once per process, not once per call.
+        let Some(searcher) = self.index.get() else {
             return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "Local index not found. Set BOSE_INDEX_PATH or crawl content first.",
             )]));
@@ -254,7 +293,7 @@ impl BoseSearchServer {
                             r.search_score, r.source, r.language
                         )
                         .unwrap();
-                        let snippet = if r.body.len() > 200 { &r.body[..200] } else { &r.body };
+                        let snippet = bose_net::truncate_chars(&r.body, 200);
                         writeln!(out, "   {snippet}").unwrap();
                         writeln!(out).unwrap();
                     }
@@ -288,7 +327,9 @@ impl BoseSearchServer {
             Ok(resp) => resp,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
+                    "SearXNG is not reachable at the configured SEARXNG_URL.\n\
+                 Start it with `devenv up`, or set SEARXNG_URL to a running instance.\n\
+                 This is a transport-level failure, not an empty result.\nError: {e}"
                 ))]));
             }
         };
@@ -315,58 +356,65 @@ impl BoseSearchServer {
 
         tracing::info!(count = urls_to_fetch.len(), "Fetching URLs");
 
-        // Step 2: Fetch URLs and extract text
+        // Step 2: Fetch URLs and extract text — all through the shared
+        // client/pool/cache, not a per-call `reqwest::Client`.
         let mut documents = Vec::new();
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .user_agent("bose-search/0.1")
-            .build()
-            .map_err(|e| McpError::internal_error(format!("HTTP client error: {e}"), None))?;
+        let mut cached_hits = 0usize;
+        let mut failures: Vec<(String, String)> = Vec::new();
 
         for result in urls_to_fetch {
-            match client.get(&result.url).send().await {
-                Ok(response) if response.status().is_success() => {
-                    if let Ok(html) = response.text().await {
-                        let text = strip_html_tags(&html);
-
-                        // Skip if text is too short (likely error page)
-                        if text.len() < 100 {
-                            tracing::warn!(url = %result.url, "Skipping: text too short");
-                            continue;
-                        }
-
-                        let doc = Document {
-                            title: result.title.clone(),
-                            body: text,
-                            url: result.url.clone(),
-                            source: result.engine.clone(),
-                            language: "en".to_string(), // TODO: detect language
-                            crawled_at: Utc::now(),
-                            relevance_score: 1.0, // TODO: use actual score
-                            tags: vec![params.query.clone()],
-                        };
-
-                        documents.push(doc);
-                        tracing::info!(url = %result.url, "Fetched successfully");
-                    }
-                }
-                Ok(response) => {
-                    tracing::warn!(url = %result.url, status = %response.status(), "HTTP error");
-                }
+            let fetched = match self.net.fetch_text(&result.url).await {
+                Ok(p) => p,
                 Err(e) => {
-                    tracing::warn!(url = %result.url, error = %e, "Fetch failed");
+                    let why = e.to_string();
+                    tracing::warn!(url = %result.url, error = %why, "Fetch failed");
+                    failures.push((result.url.clone(), why));
+                    continue;
                 }
+            };
+
+            if fetched.from_cache {
+                cached_hits += 1;
             }
+
+            let text = fetched.text();
+
+            // Skip if text is too short (likely error page)
+            if text.len() < 100 {
+                tracing::warn!(url = %result.url, "Skipping: text too short");
+                failures.push((result.url.clone(), "extracted text under 100 bytes".to_string()));
+                continue;
+            }
+
+            let doc = Document {
+                title: result.title.clone(),
+                body: text,
+                url: result.url.clone(),
+                source: result.engine.clone(),
+                language: "en".to_string(), // TODO: detect language
+                crawled_at: Utc::now(),
+                relevance_score: 1.0, // TODO: use actual score
+                tags: vec![params.query.clone()],
+            };
+
+            documents.push(doc);
+            tracing::info!(url = %result.url, from_cache = fetched.from_cache, "Fetched successfully");
         }
 
         if documents.is_empty() {
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "No documents could be fetched and indexed".to_string(),
-            )]));
+            let mut msg = String::from("No documents could be fetched and indexed.\n");
+            for (url, why) in &failures {
+                msg.push_str("  - ");
+                msg.push_str(url);
+                msg.push_str(": ");
+                msg.push_str(why);
+                msg.push('\n');
+            }
+            return Ok(CallToolResult::success(vec![ContentBlock::text(msg)]));
         }
 
         // Step 3: Index documents
-        let mut indexer = match Indexer::new(&self.index_path, 50) {
+        let mut indexer = match Indexer::new(self.index.path(), 50) {
             Ok(idx) => idx,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
@@ -387,20 +435,27 @@ impl BoseSearchServer {
             ))]));
         }
 
-        tracing::info!(count = documents.len(), "Knowledge crawl complete");
+        // The handle may have opened the index before this crawl created it.
+        self.index.invalidate();
+        if let Err(e) = self.index.reload() {
+            tracing::debug!(error = %e, "Index reload after crawl was a no-op");
+        }
+
+        tracing::info!(count = documents.len(), cached = cached_hits, "Knowledge crawl complete");
 
         // Return summary
         let mut summary = format!(
-            "Successfully crawled and indexed {} documents for query \"{}\":\n\n",
+            "Successfully crawled and indexed {} documents for query \"{}\" ({} from cache):\n\n",
             documents.len(),
-            params.query
+            params.query,
+            cached_hits
         );
 
         #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
         {
             for (i, doc) in documents.iter().enumerate() {
                 writeln!(summary, "{}. {} ({})", i + 1, doc.title, doc.url).unwrap();
-                let snippet = if doc.body.len() > 150 { &doc.body[..150] } else { &doc.body };
+                let snippet = bose_net::truncate_chars(&doc.body, 150);
                 writeln!(summary, "   {snippet}...").unwrap();
                 writeln!(summary).unwrap();
             }
@@ -410,7 +465,7 @@ impl BoseSearchServer {
     }
 
     #[tool(
-        description = "Scavenger search: find high-quality content that mainstream engines miss. Uses information-theoretic surprise and submodular diversity selection to surface hidden gems from 247 engines."
+        description = "Scavenger search: surface content mainstream engines systematically miss, using information-theoretic surprise scoring and submodular diversity selection over a wide harvest."
     )]
     async fn scavenger_search(
         &self,
@@ -431,7 +486,9 @@ impl BoseSearchServer {
             Ok(r) => r,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
+                    "SearXNG is not reachable at the configured SEARXNG_URL.\n\
+                 Start it with `devenv up`, or set SEARXNG_URL to a running instance.\n\
+                 This is a transport-level failure, not an empty result.\nError: {e}"
                 ))]));
             }
         };
@@ -471,7 +528,7 @@ impl BoseSearchServer {
                 .unwrap();
                 writeln!(out, "   Why: {}", sr.explanation).unwrap();
                 if let Some(ref s) = sr.result.snippet {
-                    let truncated = if s.len() > 200 { &s[..200] } else { s };
+                    let truncated = bose_net::truncate_chars(s, 200);
                     writeln!(out, "   {truncated}").unwrap();
                 }
                 writeln!(out).unwrap();
@@ -534,54 +591,44 @@ fn format_response(resp: &SearchResponse) -> String {
             writeln!(out).unwrap();
         }
 
-        if !resp.engines_used.is_empty() {
-            writeln!(out, "Engines: {}", resp.engines_used.join(", ")).unwrap();
+        writeln!(
+            out,
+            "Engines that answered ({}): {}",
+            resp.engines_used.len(),
+            resp.engines_used.join(", ")
+        )
+        .unwrap();
+
+        // Without this, an empty result list is indistinguishable from
+        // "nothing exists". SearXNG tells us which engines it could not use,
+        // and that is the actionable half of the answer.
+        if !resp.unresponsive_engines.is_empty() {
+            writeln!(
+                out,
+                "Engines unavailable ({}): {}",
+                resp.unresponsive_engines.len(),
+                resp.unresponsive_engines
+                    .iter()
+                    .map(|e| format!("{} ({})", e.engine, e.reason))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .unwrap();
+        }
+
+        if resp.results.is_empty() {
+            out.push_str("\nNo engine returned results for this query.\n");
         }
     }
     out
 }
 
-/// Strip HTML tags from text using a simple regex-like approach.
-/// This is a basic implementation that removes <tag>...</tag> patterns.
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut in_tag = false;
-    let mut in_script_or_style = false;
-    let mut tag_buffer = String::new();
-
-    for ch in html.chars() {
-        if ch == '<' {
-            in_tag = true;
-            tag_buffer.clear();
-        } else if ch == '>' && in_tag {
-            in_tag = false;
-
-            // Check if we're entering or leaving script/style tags
-            let tag_lower = tag_buffer.to_lowercase();
-            if tag_lower.starts_with("script") || tag_lower.starts_with("style") {
-                in_script_or_style = true;
-            } else if tag_lower.starts_with("/script") || tag_lower.starts_with("/style") {
-                in_script_or_style = false;
-            }
-
-            tag_buffer.clear();
-        } else if in_tag {
-            tag_buffer.push(ch);
-        } else if !in_script_or_style {
-            result.push(ch);
-        }
-    }
-
-    // Clean up whitespace
-    result.split_whitespace().collect::<Vec<&str>>().join(" ")
-}
-
 /// Generate a cache key from search query and parameters.
-/// Uses a simple string concatenation approach for deterministic keys.
+///
+/// Uses a deterministic string concatenation so the same query always maps
+/// to the same key, which is what makes the in-memory `moka` cache hit.
 fn make_cache_key(query: &SearchQuery) -> String {
-    use std::fmt::Write;
-    let mut key = format!("q:{}", query.query);
-    let _ = write!(key, "|n:{}", query.num_results);
+    let mut key = format!("q:{}|n:{}", query.query, query.num_results);
     if let Some(ref cat) = query.category {
         let _ = write!(key, "|c:{cat}");
     }
@@ -601,10 +648,16 @@ async fn main() -> anyhow::Result<()> {
 
     let config = BoseConfig::from_env();
     let client = SearxngClient::new(&config)?;
+    let net = Net::new(&config)?.with_cache(bose_net::ResponseCache::from_env()?);
 
-    tracing::info!(url = %config.searxng_url, index = %config.index_path, "Bose MCP Server starting");
+    tracing::info!(
+        url = %config.searxng_url,
+        index = %config.index_path,
+        cache = %net.cache.root().display(),
+        "Bose MCP Server starting"
+    );
 
-    let server = BoseSearchServer::new(client, config.index_path);
+    let server = BoseSearchServer::new(client, net, config.index_path);
     let service = server.serve(stdio()).await.inspect_err(|e| {
         tracing::error!(%e, "Failed to start MCP server");
     })?;
@@ -618,40 +671,11 @@ mod tests {
     #![expect(clippy::unwrap_used, reason = "test code")]
 
     use super::*;
+    use std::time::Duration;
 
-    #[test]
-    fn test_strip_html_tags_simple() {
-        let html = "<p>Hello <b>world</b>!</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Hello world!");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_attributes() {
-        let html = r#"<div class="content"><a href="https://example.com">Link</a></div>"#;
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Link");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_script() {
-        let html = "<p>Before</p> <script>alert('test');</script> <p>After</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Before After");
-    }
-
-    #[test]
-    fn test_strip_html_tags_with_style() {
-        let html = "<p>Before</p> <style>body { color: red; }</style> <p>After</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Before After");
-    }
-
-    #[test]
-    fn test_strip_html_tags_whitespace_cleanup() {
-        let html = "<p>Hello   \n\n  world</p>";
-        let text = strip_html_tags(html);
-        assert_eq!(text, "Hello world");
+    /// A `Net` with caching off, for tests that assert on request counts.
+    fn net_for(config: &BoseConfig) -> Net {
+        Net::new(config).unwrap().with_cache(bose_net::ResponseCache::disabled())
     }
 
     #[tokio::test]
@@ -682,7 +706,9 @@ mod tests {
 
         let config = BoseConfig::from_env();
         let client = SearxngClient::new(&config).unwrap();
-        let server = BoseSearchServer::new(client, config.index_path);
+        let net = Net::new(&config).unwrap().with_cache(bose_net::ResponseCache::disabled());
+        let index_path = config.index_path.clone();
+        let server = BoseSearchServer::new(client, net, index_path);
 
         let params = ReadUrlParams { url: format!("{}/test", mock_server.uri()) };
 
@@ -711,7 +737,9 @@ mod tests {
 
         let config = BoseConfig::from_env();
         let client = SearxngClient::new(&config).unwrap();
-        let server = BoseSearchServer::new(client, config.index_path);
+        let net = Net::new(&config).unwrap().with_cache(bose_net::ResponseCache::disabled());
+        let index_path = config.index_path.clone();
+        let server = BoseSearchServer::new(client, net, index_path);
 
         let params = ReadUrlParams { url: format!("{}/error", mock_server.uri()) };
 
@@ -742,7 +770,9 @@ mod tests {
 
         let config = BoseConfig::from_env();
         let client = SearxngClient::new(&config).unwrap();
-        let server = BoseSearchServer::new(client, config.index_path);
+        let net = Net::new(&config).unwrap().with_cache(bose_net::ResponseCache::disabled());
+        let index_path = config.index_path.clone();
+        let server = BoseSearchServer::new(client, net, index_path);
 
         let params = ReadUrlParams { url: format!("{}/large", mock_server.uri()) };
 
@@ -785,7 +815,7 @@ mod tests {
 
         let config = BoseConfig { searxng_url: mock_server.uri(), ..BoseConfig::default() };
         let client = SearxngClient::new(&config).unwrap();
-        let server = BoseSearchServer::new(client, config.index_path);
+        let server = BoseSearchServer::new(client, net_for(&config), config.index_path);
 
         let params = WebSearchParams {
             query: "rust".to_string(),
@@ -843,7 +873,8 @@ mod tests {
         let cache =
             Cache::builder().max_capacity(1000).time_to_live(Duration::from_secs(1)).build();
 
-        let server = BoseSearchServer { client, index_path: config.index_path, cache };
+        let mut server = BoseSearchServer::new(client, net_for(&config), config.index_path);
+        server.cache = cache;
 
         let params = WebSearchParams {
             query: "test".to_string(),
@@ -972,7 +1003,8 @@ mod tests {
             ..BoseConfig::default()
         };
         let client = SearxngClient::new(&config).unwrap();
-        let server = BoseSearchServer::new(client, index_path.clone());
+        let net = net_for(&config);
+        let server = BoseSearchServer::new(client, net, index_path.clone());
 
         // Test crawl_knowledge
         let crawl_params = CrawlKnowledgeParams {

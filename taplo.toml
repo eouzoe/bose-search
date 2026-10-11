@@ -1,0 +1,12 @@
+# taplo configuration.
+#
+# `.devenv/profile` is a symlink farm into the Nix store and contains copies
+# of unrelated upstream `Cargo.toml` files (git's contrib, for example).
+# `taplo fmt --check` walks them without consulting `.gitignore`, so they are
+# excluded explicitly.
+
+exclude = [".devenv/**", "target/**", "result/**"]
+
+[formatting]
+align_entries = false
+reorder_keys = false

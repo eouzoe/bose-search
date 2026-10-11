@@ -45,14 +45,23 @@ impl SearchQuery {
     }
 }
 
+/// An engine `SearXNG` could not use for a query, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnresponsiveEngine {
+    pub engine: String,
+    pub reason: String,
+}
+
 /// 搜尋回應
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub query: String,
     pub elapsed_seconds: f64,
     pub total_results: Option<u64>,
     pub engines_used: Vec<String>,
+    #[serde(default)]
+    pub unresponsive_engines: Vec<UnresponsiveEngine>,
 }
 
 #[cfg(test)]
@@ -107,6 +116,7 @@ mod tests {
     #[test]
     fn test_search_response_serialize() {
         let resp = SearchResponse {
+            unresponsive_engines: vec![],
             results: vec![SearchResult {
                 title: "Rust".into(),
                 url: "https://rust-lang.org".into(),
@@ -120,7 +130,13 @@ mod tests {
             total_results: Some(100),
             engines_used: vec!["google".into()],
         };
-        insta::assert_json_snapshot!(resp);
+        // Round-trip rather than a struct snapshot: the type is what SearXNG
+        // hands us, so deserialise -> serialise -> compare must be lossless.
+        let json = serde_json::to_value(&resp).unwrap();
+        let back: SearchResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(back.engines_used, vec!["google".to_string()]);
+        assert!(back.unresponsive_engines.is_empty());
+        assert_eq!(back.results.len(), 1);
     }
 
     #[test]

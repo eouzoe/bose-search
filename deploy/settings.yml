@@ -1,0 +1,121 @@
+# SearXNG settings for bose-search.
+#
+# This replaces the container image's settings. Two deliberate changes from
+# the previous configuration:
+#
+#   1. No proxy. The old file routed `all://` through a Tor SOCKS container,
+#      which meant every engine query paid three Tor hops and then timed out
+#      once that container stopped. Engines are fetched directly by default;
+#      anonymity is opt-in per engine or per request.
+#   2. The JSON API is on, with the limiter off, because this is a local
+#      single-user instance bound to 127.0.0.1.
+#
+# Run with: devenv up
+
+use_default_settings: true
+
+general:
+  instance_name: "bose-search"
+
+search:
+  default_lang: "en"
+  autocomplete: ""
+  safe_search: 0
+  # The JSON API is off by default in `use_default_settings`; without this the
+  # server answers 403 Forbidden to every /search?format=json request.
+  formats:
+    - html
+    - json
+  # Local single-user instance; the default ban is aimed at public instances.
+  suspended_times:
+    SearxEngineAccessDenied: 0
+    SearxEngineCaptcha: 0
+    SearxEngineTooManyRequests: 0
+    cf_SearxEngineCaptcha: 0
+    cf_SearxEngineAccessDenied: 0
+    recaptcha_SearxEngineCaptcha: 0
+
+server:
+  # Overridden by SEARXNG_SECRET in devenv.nix for real runs.
+  secret_key: "bose-search-dev"
+  limiter: false
+  image_proxy: false
+  bind_address: "127.0.0.1"
+  port: 8080
+  # JSON output without an HTML form is what the MCP server consumes.
+  public_instance: false
+
+outgoing:
+  request_timeout: 15.0
+  max_request_timeout: 30.0
+  # Deliberately empty: see the header comment. Set per-engine `proxies:`
+  # below to route a specific engine through a SOCKS proxy.
+  proxies: {}
+  using_tor_proxy: false
+  enable_http2: true
+
+ui:
+  static_use_hash: true
+
+engines:
+  # --- General web -----------------------------------------------------------
+  - name: brave
+    weight: 1.5
+    disabled: false
+
+  - name: bing
+    weight: 1.5
+
+  - name: mojeek
+    weight: 2.0
+
+  - name: mwmbl
+    weight: 1.0
+
+  - name: startpage
+    weight: 2.0
+
+  - name: yahoo
+    weight: 1.0
+
+  # YaCy is a community instance; slower, but it indexes the parts of the
+  # web Google declines to.
+  - name: yacy
+    weight: 0.5
+    base_url:
+      - https://yacy.searchlab.eu
+      - https://search.lomig.me
+
+  # --- Developer sources ----------------------------------------------------
+  # These are the highest-value engines for this tool's use case and are
+  # weighted accordingly.
+  - name: github
+    weight: 3.0
+  - name: stackoverflow
+    weight: 3.0
+
+  # --- Reference ------------------------------------------------------------
+  - name: wikipedia
+    weight: 2.0
+
+  # --- Deliberately disabled ------------------------------------------------
+  # Google and DuckDuckGo block datacenter IPs aggressively; leaving them
+  # enabled only produces "Suspended" noise and slows every query down.
+  # Re-enable together with a residential proxy if you need them.
+  - name: google
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+
+  # Onion/clearnet-hidden engines pulled in by `use_default_settings`. They
+  # resolve over nonexistent .onion namespaces and fail registration on every
+  # boot, which is noise we do not want in the log. `.onion` is out of scope.
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
+
+  - name: youtube
+    disabled: true
+  - name: dailymotion
+    disabled: true

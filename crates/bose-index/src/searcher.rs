@@ -165,6 +165,89 @@ impl Searcher {
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
     }
+
+    /// Force the reader to pick up externally committed changes.
+    ///
+    /// Call this after an `Indexer` in the same process writes new documents,
+    /// otherwise the reader keeps serving the pre-write segment list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reload fails.
+    pub fn reload(&self) -> Result<()> {
+        self.reader.reload().context("Failed to reload index reader")
+    }
+}
+
+/// A lazily-opened, process-lifetime `Searcher`.
+///
+/// `Searcher::new` costs a directory walk plus reader setup. The server used
+/// to call it inside every `local_search`, paying that cost on every single
+/// tool call. This handle opens once and keeps the result.
+///
+/// The index directory may legitimately not exist yet — a fresh install has
+/// no index until the first `crawl_knowledge` — so construction is deferred
+/// and failure is reported as "not available" rather than an error.
+#[derive(Clone)]
+pub struct SearcherHandle {
+    path: String,
+    inner: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Searcher>>>>,
+}
+
+impl SearcherHandle {
+    /// Create a handle for `path`. Does not touch the filesystem.
+    #[must_use]
+    pub fn new(path: impl Into<String>) -> Self {
+        Self { path: path.into(), inner: std::sync::Arc::new(std::sync::Mutex::new(None)) }
+    }
+
+    /// The cached `Searcher`, opening the index on first use.
+    ///
+    /// Returns `None` if the index cannot be opened — which on a fresh
+    /// install simply means "nothing has been crawled yet".
+    #[must_use]
+    pub fn get(&self) -> Option<std::sync::Arc<Searcher>> {
+        let mut guard = self.lock();
+        if let Some(s) = guard.as_ref() {
+            return Some(std::sync::Arc::clone(s));
+        }
+        let searcher = Searcher::new(&self.path).ok()?;
+        let arc = std::sync::Arc::new(searcher);
+        *guard = Some(std::sync::Arc::clone(&arc));
+        Some(arc)
+    }
+
+    /// The directory the Tantivy index lives in.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Drop the cached searcher so the next `get` reopens the directory.
+    ///
+    /// Used when the index is (re)created by this process.
+    pub fn invalidate(&self) {
+        *self.lock() = None;
+    }
+
+    /// Reopen and refresh the cached searcher, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reader cannot be reloaded.
+    pub fn reload(&self) -> anyhow::Result<()> {
+        let guard = self.lock();
+        if let Some(s) = guard.as_ref() {
+            s.reload()?;
+        }
+        Ok(())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<std::sync::Arc<Searcher>>> {
+        // A poisoned mutex here only means a panic happened while we were
+        // opening the index; the inner Option is still valid.
+        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 #[cfg(test)]
@@ -285,5 +368,86 @@ mod tests {
         assert!(!result.source.is_empty());
         assert!(!result.language.is_empty());
         assert!(result.search_score > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod handle_tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
+    use super::*;
+    use crate::indexer::{Document, Indexer};
+    use chrono::Utc;
+    use tempfile::TempDir;
+
+    fn seed(dir: &TempDir) {
+        let mut indexer = Indexer::new(dir.path(), 50).unwrap();
+        indexer
+            .add_documents(&[Document {
+                title: "Handle test".to_string(),
+                body: "lazy searcher handle content".to_string(),
+                url: "https://example.com/h".to_string(),
+                source: "test".to_string(),
+                language: "en".to_string(),
+                crawled_at: Utc::now(),
+                relevance_score: 1.0,
+                tags: vec!["handle".to_string()],
+            }])
+            .unwrap();
+        indexer.commit().unwrap();
+    }
+
+    #[test]
+    fn opens_once_and_reuses() {
+        let dir = TempDir::new().unwrap();
+        seed(&dir);
+        let h = SearcherHandle::new(dir.path().to_str().unwrap());
+
+        let first = h.get().unwrap();
+        let second = h.get().unwrap();
+        // Same Arc: the index was opened exactly once.
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(first.num_docs(), 1);
+    }
+
+    #[test]
+    fn missing_index_is_none_not_a_panic() {
+        let dir = TempDir::new().unwrap();
+        let h = SearcherHandle::new(dir.path().join("does-not-exist").to_str().unwrap());
+        assert!(h.get().is_none());
+    }
+
+    #[test]
+    fn invalidate_forces_reopen() {
+        let dir = TempDir::new().unwrap();
+        seed(&dir);
+        let h = SearcherHandle::new(dir.path().to_str().unwrap());
+
+        let before = h.get().unwrap();
+        h.invalidate();
+        let after = h.get().unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&before, &after));
+    }
+
+    #[test]
+    fn sees_documents_written_after_open() {
+        let dir = TempDir::new().unwrap();
+        let h = SearcherHandle::new(dir.path().to_str().unwrap());
+
+        // Open first (index may not exist yet on a fresh install).
+        assert!(h.get().is_none());
+
+        seed(&dir);
+        h.invalidate();
+        let s = h.get().unwrap();
+        assert_eq!(s.num_docs(), 1);
+        assert!(!s.search("lazy", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reload_is_safe_without_a_searcher() {
+        let dir = TempDir::new().unwrap();
+        let h = SearcherHandle::new(dir.path().to_str().unwrap());
+        assert!(h.reload().is_ok());
     }
 }
