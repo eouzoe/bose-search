@@ -570,6 +570,12 @@ impl ServerHandler for BoseSearchServer {
     }
 }
 
+/// Maximum snippet bytes kept per result. Truncation is UTF-8-safe via
+/// [`bose_net::truncate_with_marker`] — never slice a snippet by raw byte
+/// index: a CJK snippet panics and kills the tokio worker, which surfaces
+/// to the client as an aborted tool call.
+const SNIPPET_MAX_BYTES: usize = 200;
+
 fn format_response(resp: &SearchResponse) -> String {
     let mut out = String::new();
     #[expect(clippy::unwrap_used, reason = "write! to String is infallible")]
@@ -587,7 +593,7 @@ fn format_response(resp: &SearchResponse) -> String {
             writeln!(out, "{}. [{}]({})", i + 1, r.title, r.url).unwrap();
             writeln!(out, "   Source: {} | Category: {}", r.engine, r.category).unwrap();
             if let Some(ref s) = r.snippet {
-                let truncated = if s.len() > 200 { &s[..200] } else { s };
+                let truncated = bose_net::truncate_with_marker(s, SNIPPET_MAX_BYTES);
                 writeln!(out, "   {truncated}").unwrap();
             }
             writeln!(out).unwrap();
@@ -918,6 +924,60 @@ mod tests {
         let query4 = SearchQuery::new("python programming");
         let key4 = make_cache_key(&query4);
         assert_ne!(key1, key4);
+    }
+
+    /// Regression: snippet truncation used `&s[..200]`, which panics when
+    /// byte 200 lands inside a multi-byte char. Every CJK query then killed
+    /// the tokio worker, so the client saw an aborted tool call.
+    #[test]
+    fn test_format_response_does_not_panic_on_cjk_snippets() {
+        use bose_common::{SearchResponse, SearchResult};
+
+        let resp = SearchResponse {
+            query: "臺北市資訊科能力競賽".to_string(),
+            results: vec![SearchResult {
+                title: "臺北市資訊科能力競賽".to_string(),
+                url: "https://example.com".to_string(),
+                // 200 bytes of 3-byte CJK: byte index 200 is mid-char.
+                snippet: Some("臺".repeat(100)),
+                engine: "google".to_string(),
+                score: None,
+                category: "general".to_string(),
+            }],
+            elapsed_seconds: 1.0,
+            total_results: None,
+            engines_used: vec!["google".to_string()],
+            unresponsive_engines: vec![],
+        };
+
+        // Panics here on the old code.
+        let out = format_response(&resp);
+        assert!(out.contains("臺"));
+    }
+
+    /// Snippets are bounded, and the bound holds for CJK too.
+    #[test]
+    fn test_format_response_truncates_cjk_within_budget() {
+        use bose_common::{SearchResponse, SearchResult};
+
+        let resp = SearchResponse {
+            query: "q".to_string(),
+            results: vec![SearchResult {
+                title: "t".to_string(),
+                url: "https://example.com".to_string(),
+                snippet: Some("中".repeat(500)),
+                engine: "google".to_string(),
+                score: None,
+                category: "general".to_string(),
+            }],
+            elapsed_seconds: 1.0,
+            total_results: None,
+            engines_used: vec!["google".to_string()],
+            unresponsive_engines: vec![],
+        };
+
+        let out = format_response(&resp);
+        assert!(out.contains("… [truncated]"), "expected truncation marker");
     }
 
     #[tokio::test]
