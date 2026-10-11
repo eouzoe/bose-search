@@ -43,11 +43,11 @@ commit-msg:
         # Format: <type>(<scope>): <subject>
         # Types: feat, fix, docs, style, refactor, perf, test, chore
         msg=$(cat {1})
-        if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+\))?: .+'; then
+        if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+'; then
           echo "❌ Commit message must follow conventional commits format:"
           echo "   <type>(<scope>): <subject>"
           echo ""
-          echo "   Types: feat, fix, docs, style, refactor, perf, test, chore"
+          echo "   Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
           echo "   Example: feat(mcp): add web_search tool"
           exit 1
         fi
