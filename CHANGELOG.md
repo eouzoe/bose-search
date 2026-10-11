@@ -26,3 +26,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 128 tests across 5 crates
 - Zero clippy warnings
 - Rust 2024 edition
+# hook verification
