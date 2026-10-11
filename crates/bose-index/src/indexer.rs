@@ -140,6 +140,59 @@ impl Indexer {
         Ok(())
     }
 
+    /// Remove every document whose `url` matches, then insert `doc`.
+    ///
+    /// URL is the identity of a crawled page, so re-crawling the same URL
+    /// must replace its entry rather than append a second copy. Without this
+    /// the second `crawl_knowledge` for the same query duplicates every
+    /// result, which is what `local_search` was returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete or the write fails.
+    pub fn upsert_document(&mut self, doc: &Document) -> Result<()> {
+        self.delete_by_url(&doc.url)?;
+        self.add_document(doc)
+    }
+
+    /// Delete all documents carrying `url`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the field lookup or the delete fails.
+    pub fn delete_by_url(&mut self, url: &str) -> Result<()> {
+        let schema = self.index.schema();
+        let url_field = schema.get_field(fields::URL)?;
+        let term = tantivy::Term::from_field_text(url_field, url);
+        self.writer.delete_term(term);
+        Ok(())
+    }
+
+    /// Number of documents currently stored for `url`.
+    ///
+    /// Used to tell a fresh insert from a replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reader cannot be obtained.
+    pub fn count_by_url(&self, url: &str) -> Result<usize> {
+        use tantivy::Searcher;
+        use tantivy::collector::DocSetCollector;
+        use tantivy::query::TermQuery;
+        use tantivy::schema::IndexRecordOption;
+
+        let schema = self.index.schema();
+        let url_field = schema.get_field(fields::URL)?;
+        let term = tantivy::Term::from_field_text(url_field, url);
+
+        // A committed reader is required for a correct count; fall back to 0
+        // when the index is brand new and nothing has been committed yet.
+        let reader = self.index.reader().context("Failed to create reader")?;
+        let searcher: Searcher = reader.searcher();
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        Ok(searcher.search(&query, &DocSetCollector)?.len())
+    }
+
     /// 提交所有待處理的文檔
     ///
     /// # Errors
@@ -246,5 +299,108 @@ mod tests {
         // 重新打開
         let indexer = Indexer::new(temp_dir.path(), 50);
         assert!(indexer.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod upsert_tests {
+    #![expect(clippy::unwrap_used, reason = "test code")]
+
+    use super::*;
+    use crate::searcher::Searcher;
+    use tempfile::TempDir;
+
+    fn doc_with(url: &str, body: &str) -> Document {
+        Document {
+            title: format!("Doc for {url}"),
+            body: body.to_string(),
+            url: url.to_string(),
+            source: "test".to_string(),
+            language: "en".to_string(),
+            crawled_at: Utc::now(),
+            relevance_score: 1.0,
+            tags: vec!["test".to_string()],
+        }
+    }
+
+    fn count_for(dir: &TempDir, url: &str) -> usize {
+        let indexer = Indexer::new(dir.path(), 50).unwrap();
+        indexer.count_by_url(url).unwrap()
+    }
+
+    #[test]
+    fn add_document_twice_duplicates() {
+        // The behaviour we are moving away from: add_document is a plain
+        // append, so the same URL stored twice is two searchable rows.
+        let dir = TempDir::new().unwrap();
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.add_document(&doc_with("https://e.com/a", "v1")).unwrap();
+            i.add_document(&doc_with("https://e.com/a", "v2")).unwrap();
+            i.commit().unwrap();
+        }
+        assert_eq!(count_for(&dir, "https://e.com/a"), 2);
+    }
+
+    #[test]
+    fn upsert_replaces_instead_of_appending() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "v1")).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "v2")).unwrap();
+            i.commit().unwrap();
+        }
+        assert_eq!(count_for(&dir, "https://e.com/a"), 1);
+    }
+
+    #[test]
+    fn upsert_keeps_other_urls() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "a")).unwrap();
+            i.upsert_document(&doc_with("https://e.com/b", "b")).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "a2")).unwrap();
+            i.commit().unwrap();
+        }
+        assert_eq!(count_for(&dir, "https://e.com/a"), 1);
+        assert_eq!(count_for(&dir, "https://e.com/b"), 1);
+    }
+
+    #[test]
+    fn upsert_updates_the_stored_body() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "oldbody")).unwrap();
+            i.commit().unwrap();
+        }
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.upsert_document(&doc_with("https://e.com/a", "newbody uniqueword")).unwrap();
+            i.commit().unwrap();
+        }
+        let s = Searcher::new(dir.path()).unwrap();
+        let found = s.search("uniqueword", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].body.contains("newbody"));
+    }
+
+    #[test]
+    fn delete_by_url_removes_everything_for_that_url() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.add_document(&doc_with("https://e.com/a", "x")).unwrap();
+            i.add_document(&doc_with("https://e.com/a", "y")).unwrap();
+            i.commit().unwrap();
+        }
+        {
+            let mut i = Indexer::new(dir.path(), 50).unwrap();
+            i.delete_by_url("https://e.com/a").unwrap();
+            i.commit().unwrap();
+        }
+        assert_eq!(count_for(&dir, "https://e.com/a"), 0);
     }
 }

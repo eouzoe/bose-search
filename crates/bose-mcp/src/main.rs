@@ -424,7 +424,9 @@ impl BoseSearchServer {
         };
 
         for doc in &documents {
-            if let Err(e) = indexer.add_document(doc) {
+            // URL is the page's identity: re-crawling replaces the entry
+            // rather than appending a duplicate.
+            if let Err(e) = indexer.upsert_document(doc) {
                 tracing::error!(url = %doc.url, error = %e, "Failed to index document");
             }
         }
