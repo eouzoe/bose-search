@@ -3,7 +3,7 @@ name = "bose-crawler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "High-performance HTTP crawler with PID-based rate control and optional io_uring support"
+description = "HTTP crawler with PID-based rate control"
 
 [dependencies]
 tokio = { workspace = true }
@@ -16,14 +16,13 @@ sysinfo = { workspace = true }
 
 bose-common = { path = "../bose-common" }
 
-[dependencies.monoio]
-workspace = true
-optional = true
-
 [dev-dependencies]
 tokio-test = { workspace = true }
 wiremock = { workspace = true }
 
+# `io-uring` was previously wired to monoio. It was removed rather than
+# left as an unbuilt optional dependency: monoio pulls fxhash, which is
+# unmaintained (RUSTSEC-2025-0057) with no patched release, and the feature
+# was never enabled in any build. Revisit only with a real io_uring plan.
 [features]
 default = []
-io-uring = ["monoio"]

@@ -14,10 +14,16 @@ allow = [
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
-  "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
-  "Unicode-DFS-2016",
+  # Added for the tantivy 0.26 upgrade (its html/normalize stack and
+  # hashing helpers). All are permissive and source-available; MPL-2.0 is
+  # file-level copyleft, which does not reach bose-search's MIT/Apache code
+  # because nothing here is linked into a single binary.
+  "MPL-2.0",
+  "Zlib",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 exceptions = []

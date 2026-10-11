@@ -91,7 +91,7 @@ impl Searcher {
         let query = query_parser.parse_query(query).context("Failed to parse query")?;
 
         // 執行搜尋
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
         // 轉換結果
         let mut results = Vec::new();
@@ -100,49 +100,47 @@ impl Searcher {
 
             let title = retrieved_doc
                 .get_first(title_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
             let body = retrieved_doc
                 .get_first(body_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
             let url_field = schema.get_field(fields::URL)?;
             let url = retrieved_doc
                 .get_first(url_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
             let source_field = schema.get_field(fields::SOURCE)?;
             let source = retrieved_doc
                 .get_first(source_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
             let language_field = schema.get_field(fields::LANGUAGE)?;
             let language = retrieved_doc
                 .get_first(language_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
 
             let relevance_score_field = schema.get_field(fields::RELEVANCE_SCORE)?;
             let relevance_score = retrieved_doc
                 .get_first(relevance_score_field)
-                .and_then(|v: &tantivy::schema::OwnedValue| v.as_f64())
+                .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
 
             let tags_field = schema.get_field(fields::TAGS)?;
             let tags: Vec<String> = retrieved_doc
                 .get_all(tags_field)
-                .filter_map(|v: &tantivy::schema::OwnedValue| {
-                    v.as_str().map(|s: &str| s.to_string())
-                })
+                .filter_map(|v| v.as_str().map(ToOwned::to_owned))
                 .collect();
 
             results.push(SearchResult {

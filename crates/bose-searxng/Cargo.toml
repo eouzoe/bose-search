@@ -1,6 +1,7 @@
 [package]
 name = "bose-searxng"
 version.workspace = true
+license.workspace = true
 edition.workspace = true
 description = "SearXNG HTTP client for meta-search across 247 search engines"
 

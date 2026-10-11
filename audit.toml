@@ -1,0 +1,24 @@
+# cargo-audit configuration.
+#
+# Ignoring exactly one advisory, for a reason that has a revisit trigger.
+# `cargo audit` with no arguments reads this file; without it the pre-push
+# gate fails on a transitive dependency we do not control.
+
+[advisories]
+ignore = [
+  # tantivy 0.26.2 (latest) pins lru 0.16.x internally for its reader cache.
+  # The advisory's fix only exists in lru 0.18, which tantivy does not
+  # accept, so there is no upgrade path from our side.
+  #
+  # Exposure: the panic-safety issue requires a panic inside
+  # LruCache::pop(), which tantivy calls from its segment-reader cache.
+  # Nothing in bose-search triggers it directly.
+  #
+  # Revisit when: tantivy publishes a release depending on lru >= 0.18.
+  "RUSTSEC-2026-0253",
+]
+
+# Emit warnings rather than failing for informational advisories, so a new
+# "unmaintained" notice does not silently block a push on a dep we cannot fix.
+[output]
+deny = ["unmaintained"]
