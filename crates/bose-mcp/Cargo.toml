@@ -16,7 +16,7 @@ path = "src/main.rs"
 bose-common = { path = "../bose-common" }
 bose-searxng = { path = "../bose-searxng" }
 bose-index = { path = "../bose-index" }
-rmcp = { version = "0.14", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "3.5.1", features = ["server", "transport-io", "macros"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

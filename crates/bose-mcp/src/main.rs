@@ -7,11 +7,10 @@ use bose_searxng::SearxngClient;
 use moka::future::Cache;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
-    handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters,
     model::{
-        CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
-        ToolsCapability,
+        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
+        ServerConfig,
     },
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
@@ -86,7 +85,6 @@ struct ScavengerSearchParams {
 struct BoseSearchServer {
     client: SearxngClient,
     index_path: String,
-    tool_router: ToolRouter<Self>,
     cache: Cache<String, SearchResponse>,
 }
 
@@ -97,7 +95,7 @@ impl BoseSearchServer {
         let cache =
             Cache::builder().max_capacity(1000).time_to_live(Duration::from_mins(5)).build();
 
-        Self { client, index_path, tool_router: Self::tool_router(), cache }
+        Self { client, index_path, cache }
     }
 
     #[tool(
@@ -122,7 +120,9 @@ impl BoseSearchServer {
         // Check cache first
         if let Some(cached_resp) = self.cache.get(&cache_key).await {
             tracing::info!(query = %query.query, "Cache hit");
-            return Ok(CallToolResult::success(vec![Content::text(format_response(&cached_resp))]));
+            return Ok(CallToolResult::success(vec![ContentBlock::text(format_response(
+                &cached_resp,
+            ))]));
         }
 
         tracing::info!(query = %query.query, "Cache miss");
@@ -133,9 +133,9 @@ impl BoseSearchServer {
                 // Store in cache
                 self.cache.insert(cache_key, resp.clone()).await;
 
-                Ok(CallToolResult::success(vec![Content::text(format_response(&resp))]))
+                Ok(CallToolResult::success(vec![ContentBlock::text(format_response(&resp))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
             ))])),
         }
@@ -146,13 +146,13 @@ impl BoseSearchServer {
     )]
     async fn health_check(&self) -> Result<CallToolResult, McpError> {
         match self.client.health_check().await {
-            Ok(true) => Ok(CallToolResult::success(vec![Content::text("SearXNG is healthy")])),
+            Ok(true) => Ok(CallToolResult::success(vec![ContentBlock::text("SearXNG is healthy")])),
             Ok(false) => {
-                Ok(CallToolResult::error(vec![Content::text("SearXNG is not responding")]))
+                Ok(CallToolResult::error(vec![ContentBlock::text("SearXNG is not responding")]))
             }
-            Err(e) => {
-                Ok(CallToolResult::error(vec![Content::text(format!("Health check failed: {e}"))]))
-            }
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "Health check failed: {e}"
+            ))])),
         }
     }
 
@@ -186,7 +186,7 @@ impl BoseSearchServer {
             .map_err(|e| McpError::internal_error(format!("Failed to fetch URL: {e}"), None))?;
 
         if !response.status().is_success() {
-            return Ok(CallToolResult::error(vec![Content::text(format!(
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "HTTP error: {}",
                 response.status()
             ))]));
@@ -210,7 +210,7 @@ impl BoseSearchServer {
 
         tracing::info!(url = %params.url, size = truncated.len(), "URL fetched successfully");
 
-        Ok(CallToolResult::success(vec![Content::text(truncated)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(truncated)]))
     }
 
     #[tool(
@@ -221,7 +221,7 @@ impl BoseSearchServer {
         Parameters(params): Parameters<LocalSearchParams>,
     ) -> Result<CallToolResult, McpError> {
         let Ok(searcher) = Searcher::new(&self.index_path) else {
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "Local index not found. Set BOSE_INDEX_PATH or crawl content first.",
             )]));
         };
@@ -229,7 +229,7 @@ impl BoseSearchServer {
         let limit = params.num_results.unwrap_or(10) as usize;
         match searcher.search(&params.query, limit) {
             Ok(results) if results.is_empty() => {
-                Ok(CallToolResult::success(vec![Content::text(format!(
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "No local results for \"{}\". Index has {} documents.",
                     params.query,
                     searcher.num_docs()
@@ -259,11 +259,11 @@ impl BoseSearchServer {
                         writeln!(out).unwrap();
                     }
                 }
-                Ok(CallToolResult::success(vec![Content::text(out)]))
+                Ok(CallToolResult::success(vec![ContentBlock::text(out)]))
             }
-            Err(e) => {
-                Ok(CallToolResult::error(vec![Content::text(format!("Local search failed: {e}"))]))
-            }
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "Local search failed: {e}"
+            ))])),
         }
     }
 
@@ -287,7 +287,7 @@ impl BoseSearchServer {
         let search_results = match self.client.search(&search_query).await {
             Ok(resp) => resp,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
                 ))]));
             }
@@ -308,7 +308,7 @@ impl BoseSearchServer {
             .collect();
 
         if urls_to_fetch.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No URLs found matching criteria".to_string(),
             )]));
         }
@@ -360,7 +360,7 @@ impl BoseSearchServer {
         }
 
         if documents.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No documents could be fetched and indexed".to_string(),
             )]));
         }
@@ -369,7 +369,7 @@ impl BoseSearchServer {
         let mut indexer = match Indexer::new(&self.index_path, 50) {
             Ok(idx) => idx,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "Failed to create indexer: {e}"
                 ))]));
             }
@@ -382,7 +382,7 @@ impl BoseSearchServer {
         }
 
         if let Err(e) = indexer.commit() {
-            return Ok(CallToolResult::error(vec![Content::text(format!(
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Failed to commit index: {e}"
             ))]));
         }
@@ -406,7 +406,7 @@ impl BoseSearchServer {
             }
         }
 
-        Ok(CallToolResult::success(vec![Content::text(summary)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(summary)]))
     }
 
     #[tool(
@@ -430,14 +430,16 @@ impl BoseSearchServer {
         let resp = match self.client.search(&query).await {
             Ok(r) => r,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "SearXNG not reachable. Start SearXNG first:\n  cd deploy && podman-compose up -d\nError: {e}"
                 ))]));
             }
         };
 
         if resp.results.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text("No results to scavenge.")]));
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
+                "No results to scavenge.",
+            )]));
         }
 
         let config = ScavengerConfig { top_k, ..ScavengerConfig::default() };
@@ -476,35 +478,36 @@ impl BoseSearchServer {
             }
         }
 
-        Ok(CallToolResult::success(vec![Content::text(out)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(out)]))
     }
 }
 
 #[tool_handler]
 impl ServerHandler for BoseSearchServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::default(),
-            capabilities: ServerCapabilities {
-                tools: Some(ToolsCapability::default()),
-                ..Default::default()
-            },
-            server_info: Implementation {
-                name: "bose-search".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                title: None,
-                icons: None,
-                website_url: None,
-            },
-            instructions: Some(
-                "Bose Search — meta-search engine powered by SearXNG (247 backends).\n\
-                 Requires SearXNG running at SEARXNG_URL (default http://localhost:8080).\n\
-                 Start SearXNG first:\n  cd deploy && podman-compose up -d\n\
-                 Uses docker.io/searxng/searxng:latest + peterdavehello/tor-socks-proxy \
-                 for anti-blocking."
-                    .into(),
-            ),
-        }
+    fn get_info(&self) -> ServerConfig {
+        // The 2026-07-28 revision has no `initialize` handshake, so a server
+        // answering `initialize` can never name LATEST — it must name
+        // `LATEST_WITH_INITIALIZE`. The full range is advertised separately
+        // through `supported_protocol_versions()` / `server/discover`.
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("bose-search", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
+                "Bose Search — meta-search engine powered by SearXNG.\n\
+                 Serves MCP protocol revision 2026-07-28 (stateless) and falls back to the\n\
+                 2025-11-25 handshake for legacy clients.\n\
+                 Tools: web_search (SearXNG), local_search (Tantivy), read_url, crawl_knowledge,\n\
+                 scavenger_search, recall (raw cache), health_check.\n\
+                 Requires SearXNG running (devenv up) at SEARXNG_URL (default http://localhost:8080).",
+            )
+    }
+
+    /// Advertise every revision this server can speak, oldest first.
+    ///
+    /// Dual-era: `2026-07-28` gives stateless requests with `resultType` and
+    /// header routing; the 2025-era revisions keep the historical wire shape
+    /// so existing clients (opencode, Claude Code) keep working unchanged.
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        std::borrow::Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::LATEST))
     }
 }
 
@@ -840,12 +843,7 @@ mod tests {
         let cache =
             Cache::builder().max_capacity(1000).time_to_live(Duration::from_secs(1)).build();
 
-        let server = BoseSearchServer {
-            client,
-            index_path: config.index_path,
-            tool_router: BoseSearchServer::tool_router(),
-            cache,
-        };
+        let server = BoseSearchServer { client, index_path: config.index_path, cache };
 
         let params = WebSearchParams {
             query: "test".to_string(),
