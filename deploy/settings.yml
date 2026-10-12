@@ -58,64 +58,180 @@ ui:
   static_use_hash: true
 
 engines:
-  # --- General web -----------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Engines. All explicitly `disabled: false` so the intent is unambiguous —
+  # an entry that only sets `weight` inherits the default, and several useful
+  # engines (mwmbl, yacy) ship disabled. `use_default_settings: true` above
+  # still supplies the shared base (JSON API, formats, ban times).
+  #
+  # Selection criteria: no API key required, and tolerates a datacenter IP
+  # without an instant ban. Engines that reliably rate-limit or block from a
+  # datacenter (the google* family, duckduckgo*, facebook, twitter) are left
+  # out on purpose — they were the original single point of failure. The
+  # breadth below is the mitigation: no one engine holding is fatal.
+  # ---------------------------------------------------------------------------
+
+  # --- General web search ---------------------------------------------------
   - name: brave
-    weight: 1.5
     disabled: false
-
-  - name: bing
     weight: 1.5
-
+  - name: bing
+    disabled: false
+    weight: 1.5
+  - name: bing_news
+    disabled: false
   - name: mojeek
+    disabled: false
     weight: 2.0
-
   - name: mwmbl
+    disabled: false
     weight: 1.0
-
   - name: startpage
+    disabled: false
     weight: 2.0
-
   - name: yahoo
-    weight: 1.0
-
-  # YaCy is a community instance; slower, but it indexes the parts of the
-  # web Google declines to.
-  - name: yacy
-    weight: 0.5
+    disabled: false
+  - name: yahoo_news
+    disabled: false
+  - name: qwant
+    disabled: false
+    weight: 1.5
+  - name: swisscows
+    disabled: false
+  - name: dogpile
+    disabled: false
+  - name: marginalia
+    disabled: false
+  - weight: 0.5
+    name: yacy
+    disabled: false
     base_url:
       - https://yacy.searchlab.eu
       - https://search.lomig.me
 
+  # --- China / Mongolia / Russia angles -------------------------------------
+  # Regional engines that index the local-language sources the topic needs.
+  - name: baidu
+    disabled: false
+  - name: sogou
+    disabled: false
+  - name: sogou_wechat
+    disabled: false
+  - name: sogou_videos
+    disabled: false
+  - name: chinaso
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: yandex_api
+    disabled: false
+  - name: naver
+    disabled: false
+  - name: seznam
+    disabled: false
+  - name: tonline
+    disabled: false
+  - name: tagesschau
+    disabled: false
+  - name: ansa
+    disabled: false
+  - name: reuters
+    disabled: false
+
+  # --- News -----------------------------------------------------------------
+  - name: yahoo_news
+    disabled: false
+  - name: bing_news
+    disabled: false
+
+  # --- Science / medicine (directly relevant to an outbreak trace) ----------
+  - name: arxiv
+    disabled: false
+  - name: pubmed
+    disabled: false
+    weight: 2.0
+  - name: europepmc
+    disabled: false
+    weight: 2.0
+  - name: crossref
+    disabled: false
+  - name: semantic_scholar
+    disabled: false
+  - name: openalex
+    disabled: false
+  - name: pdbe
+    disabled: false
+  - name: core.ac.uk
+    disabled: false
+
   # --- Developer sources ----------------------------------------------------
-  # These are the highest-value engines for this tool's use case and are
-  # weighted accordingly.
   - name: github
+    disabled: false
     weight: 3.0
+  - name: github_code
+    disabled: false
+  - name: gitlab
+    disabled: false
+  - name: sourcehut
+    disabled: false
+  - name: gitea
+    disabled: false
   - name: stackoverflow
+    disabled: false
     weight: 3.0
+  - name: superuser
+    disabled: false
+  - name: askubuntu
+    disabled: false
+  - name: pypi
+    disabled: false
+  - name: crates
+    disabled: false
+  - name: npm
+    disabled: false
+  - name: pkg_go_dev
+    disabled: false
+  - name: docker_hub
+    disabled: false
+  - name: repology
+    disabled: false
+  - name: lib_rs
+    disabled: false
 
   # --- Reference ------------------------------------------------------------
   - name: wikipedia
+    disabled: false
     weight: 2.0
+  - name: wikidata
+    disabled: false
+  - name: wikinews
+    disabled: false
+  - name: wiktionary
+    disabled: false
+  - name: openlibrary
+    disabled: false
+  - name: dictzone
+    disabled: false
+  - name: etymonline
+    disabled: false
+  - name: wordnik
+    disabled: false
+  - name: openstreetmap
+    disabled: false
+  - name: photon
+    disabled: false
 
-  # --- Deliberately disabled ------------------------------------------------
-  # Google and DuckDuckGo block datacenter IPs aggressively; leaving them
-  # enabled only produces "Suspended" noise and slows every query down.
-  # Re-enable together with a residential proxy if you need them.
-  - name: google
-    disabled: true
-  - name: duckduckgo
-    disabled: true
+  # --- Social / forums ------------------------------------------------------
+  - name: hackernews
+    disabled: false
+  - name: mastodon
+    disabled: false
+  - name: lemmy
+    disabled: false
+  - name: sepiasearch
+    disabled: false
+  - name: peertube
+    disabled: false
 
-  # Onion/clearnet-hidden engines pulled in by `use_default_settings`. They
-  # resolve over nonexistent .onion namespaces and fail registration on every
-  # boot, which is noise we do not want in the log. `.onion` is out of scope.
-  - name: ahmia
-    disabled: true
-  - name: torch
-    disabled: true
-
-  - name: youtube
-    disabled: true
-  - name: dailymotion
-    disabled: true
+  # Deliberately disabled: datacenter-IP bans + noise (see backup header).
+  # google*, duckduckgo*, youtube_api, ahmia, torch infrastructure .onion.
