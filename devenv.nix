@@ -1,12 +1,10 @@
 # bose-search development environment.
 #
-# One `devenv up` replaces the old `podman-compose up -d`: SearXNG runs as a
-# Nix-packaged process instead of a container, and the whole toolchain
-# (including the cmake/clang packages that a BoringSSL-based HTTP client
-# needs to build) comes from the same closure.
-#
-# No container runtime, no image pulls, and the SearXNG configuration is a
-# plain file you can read and diff.
+# The released MCP server is a plain binary (see `just install`);
+# `devenv` provides the toolchain. SearXNG — the meta-search
+# backend this server queries — runs as a single shared instance
+# under the gstack-toolchain devenv, not here; see the note under
+# "Processes" below and gstack-toolchain/devenv.nix.
 
 { pkgs, lib, config, ... }:
 
@@ -39,23 +37,16 @@
 
   # --- Processes -------------------------------------------------------------
   #
-  # `devenv up` starts both. SearXNG binds 127.0.0.1:8080 and reads its
-  # settings from the repo, so the JSON API and engine list are reviewable in
-  # git rather than baked into a container image.
-  processes.searxng = {
-    exec = "${pkgs.searxng}/bin/searxng-run";
-    env = {
-      SEARXNG_SETTINGS_PATH = toString ./deploy/settings.yml;
-      SEARXNG_SECRET = "bose-search-dev";
-      # SearXNG splits these two env vars: `SEARXNG_BIND_ADDRESS` is a host
-      # only, and the port goes in `SEARXNG_PORT`. Passing "host:port" to the
-      # address variable makes it resolve a bogus hostname and die with
-      # "Name or service not known".
-      SEARXNG_BIND_ADDRESS = "127.0.0.1";
-      SEARXNG_PORT = "8080";
-    };
-  };
-
+  # SearXNG is NOT defined here on purpose. Both this project and
+  # gstack-toolchain need a meta-search engine on 127.0.0.1:8080, and
+  # two definitions raced for that port — each reading a different
+  # settings file, so whichever started first won and the other's
+  # engine list was ignored (that is what left only the rate-limited
+  # engines live). The single instance now runs under the persistent
+  # gstack-toolchain devenv and reads this repo's deploy/settings.yml;
+  # see gstack-toolchain/devenv.nix. `devenv up` here therefore does
+  # not start a second SearXNG, and the shell still exposes the URL.
+  #
   # --- Environment -----------------------------------------------------------
   env = {
     SEARXNG_URL = "http://127.0.0.1:8080";
@@ -74,7 +65,7 @@
   enterShell = ''
     echo "bose-search $(just --version >/dev/null 2>&1 && echo dev-env)"
     echo "  rust:   $(rustc --version | cut -d' ' -f2)"
-    echo "  process: devenv up        # SearXNG on 127.0.0.1:8080"
+    echo "  searxng: run 'devenv up -d' in gstack-toolchain (127.0.0.1:8080)"
     echo "  test:    cargo test --workspace"
     echo "  build:   cargo build --release -p bose-search"
   '';
